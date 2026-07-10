@@ -7,11 +7,12 @@ The current release profile is deliberately limited to public marketplace
 exploration. Do not interpret that milestone boundary as a permanent
 read-only architecture.
 
-Current tools may call only public GET endpoints for listing discovery,
-listing details, category browsing, public seller profiles, and privacy-safe
-bid summaries. Do not add credentials, protected endpoints, mutations, view
-recording, contact submission, bidding, buying, messaging, or account actions
-to this profile.
+Current tools may call only approved public GET endpoints for listing
+discovery, listing details and attributes, related listing discovery, public
+seller listing discovery, category and filter browsing, public seller profiles,
+public rating summaries, and privacy-safe bid summaries. Do not add
+credentials, protected endpoints, mutations, view recording, contact
+submission, bidding, buying, messaging, or account actions to this profile.
 
 Future authenticated or state-changing capability profiles require an explicit
 design for authorization, secret storage, user consent/confirmation, CSRF,
