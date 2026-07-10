@@ -19,7 +19,7 @@ pub use error::{ClientError, RequestFailureKind};
 pub use models::{
     BuyerProtectionConfig, CategoryListRequest, CategoryPage, CategorySummary,
     CategoryTranslations, FacetCount, ListingBidSummary, ListingLocation, ListingResponse,
-    ListingSearchResult, Money, Pagination, PublicAuctionHistory, PublicBadge,
+    ListingSearchResult, Money, Pagination, PriceStats, PublicAuctionHistory, PublicBadge,
     PublicVerificationStatus, SearchFacets, SearchListingHit, SearchListingsRequest,
     SellerProfileSummary, TranslationMap,
 };
@@ -29,6 +29,9 @@ use crate::models::{ApiEnvelope, ProblemDetails, PublicListingWire};
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_GET_ATTEMPTS: u32 = 3;
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(200);
+const ACCEPTED_RESPONSE_MEDIA_TYPES: &str = "application/json, application/problem+json";
+const MAX_PROBLEM_TITLE_CHARS: usize = 120;
+const MAX_PROBLEM_DETAIL_CHARS: usize = 500;
 
 #[derive(Clone)]
 pub struct PublicApiClient {
@@ -172,7 +175,7 @@ impl PublicApiClient {
         T: DeserializeOwned,
     {
         let request = request
-            .header(ACCEPT, "application/json")
+            .header(ACCEPT, ACCEPTED_RESPONSE_MEDIA_TYPES)
             .build()
             .map_err(|source| request_error(operation, source))?;
         let mut retry_delay = INITIAL_RETRY_DELAY;
@@ -277,12 +280,29 @@ impl PublicApiClient {
 
         if !status.is_success() {
             let problem = serde_json::from_slice::<ProblemDetails>(&body).ok();
+            let code = problem
+                .as_ref()
+                .and_then(|value| value.code.clone())
+                .and_then(sanitize_problem_code);
+            let (title, detail) = if status.is_server_error() {
+                (Some("Budna API unavailable".to_owned()), None)
+            } else {
+                (
+                    problem
+                        .as_ref()
+                        .and_then(|value| value.title.clone())
+                        .and_then(|value| sanitize_problem_text(value, MAX_PROBLEM_TITLE_CHARS)),
+                    problem
+                        .and_then(|value| value.detail)
+                        .and_then(|value| sanitize_problem_text(value, MAX_PROBLEM_DETAIL_CHARS)),
+                )
+            };
             return Err(ClientError::Api {
                 operation,
                 status: status.as_u16(),
-                code: problem.as_ref().and_then(|value| value.code.clone()),
-                title: problem.as_ref().and_then(|value| value.title.clone()),
-                detail: problem.and_then(|value| value.detail),
+                code,
+                title,
+                detail,
                 retry_after,
             });
         }
@@ -347,6 +367,33 @@ fn elapsed_millis(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
 
+fn sanitize_problem_code(value: String) -> Option<String> {
+    let mut bytes = value.bytes();
+    let valid = value.len() <= 64
+        && bytes.next().is_some_and(|byte| byte.is_ascii_uppercase())
+        && bytes.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_');
+    valid.then_some(value)
+}
+
+fn sanitize_problem_text(value: String, max_chars: usize) -> Option<String> {
+    let cleaned = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let normalized = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Some(normalized.chars().take(max_chars).collect())
+}
+
 #[derive(Debug, Error)]
 pub enum ClientBuildError {
     #[error("failed to build the Budna HTTP client: {0}")]
@@ -355,12 +402,12 @@ pub enum ClientBuildError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use serde_json::json;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
-        matchers::{method, path, query_param},
+        matchers::{headers, method, path, query_param},
     };
 
     use super::*;
@@ -471,8 +518,25 @@ mod tests {
             .and(path("/api/v1/search/listings"))
             .and(query_param("q", "camera lens"))
             .and(query_param("category_id", "12"))
+            .and(query_param("market", "norwegian"))
+            .and(query_param("min_price", "10"))
+            .and(query_param("max_price", "999"))
+            .and(query_param("condition", "good"))
+            .and(query_param("listing_type", "auction"))
+            .and(query_param("status", "active"))
+            .and(query_param("ending_soon", "true"))
+            .and(query_param("featured", "false"))
+            .and(query_param("free_shipping", "true"))
+            .and(query_param("sort_by", "price"))
+            .and(query_param("sort_order", "asc"))
             .and(query_param("page", "2"))
             .and(query_param("per_page", "7"))
+            .and(query_param("include_facets", "true"))
+            .and(query_param("search_mode", "hybrid"))
+            .and(query_param("location_id", "9"))
+            .and(query_param("location_region", "Oslo"))
+            .and(query_param("location_municipality", "Oslo"))
+            .and(query_param("allow_pickup", "true"))
             .and(query_param("attr_mount", "sony-e"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "success": true,
@@ -493,10 +557,26 @@ mod tests {
             .search_listings(SearchListingsRequest {
                 query: Some("camera lens".to_owned()),
                 category_id: Some(12),
+                market: Some("norwegian".to_owned()),
+                min_price: Some("10".to_owned()),
+                max_price: Some("999".to_owned()),
+                condition: Some("good".to_owned()),
+                listing_type: Some("auction".to_owned()),
+                status: Some("active".to_owned()),
+                ending_soon: Some(true),
+                featured: Some(false),
+                free_shipping: Some(true),
+                sort_by: Some("price".to_owned()),
+                sort_order: Some("asc".to_owned()),
                 page: 2,
                 limit: 7,
+                include_facets: true,
+                search_mode: Some("hybrid".to_owned()),
+                location_id: Some(9),
+                location_region: Some("Oslo".to_owned()),
+                location_municipality: Some("Oslo".to_owned()),
+                allow_pickup: Some(true),
                 custom_filters: BTreeMap::from([("attr_mount".to_owned(), "sony-e".to_owned())]),
-                ..SearchListingsRequest::default()
             })
             .await
             .unwrap_or_else(|error| panic!("search should succeed: {error}"));
@@ -546,6 +626,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/listings/404"))
+            .and(headers(
+                "accept",
+                vec!["application/json", "application/problem+json"],
+            ))
             .respond_with(ResponseTemplate::new(404).set_body_json(json!({
                 "type": "https://api.budna.se/problems/resource/listing-not-found",
                 "title": "Not Found",
@@ -567,6 +651,44 @@ mod tests {
         assert_eq!(
             error.public_message(),
             "Not Found (HTTP 404): Listing not found"
+        );
+    }
+
+    #[tokio::test]
+    async fn server_error_details_are_not_relayed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/500"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "type": "about:blank",
+                "title": "Storage connection details",
+                "status": 500,
+                "code": "INTERNAL_ERROR",
+                "detail": "sensitive diagnostic text"
+            })))
+            .mount(&server)
+            .await;
+
+        let error = match client(&server).get_listing(500).await {
+            Ok(_) => panic!("server error should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code(), Some("INTERNAL_ERROR"));
+        assert_eq!(error.public_message(), "Budna API unavailable (HTTP 500)");
+    }
+
+    #[test]
+    fn problem_fields_are_bounded_and_normalized() {
+        assert_eq!(
+            sanitize_problem_code("VALIDATION_FAILED".to_owned()).as_deref(),
+            Some("VALIDATION_FAILED")
+        );
+        assert!(sanitize_problem_code("not-valid".to_owned()).is_none());
+        assert!(sanitize_problem_code(format!("A{}", "B".repeat(64))).is_none());
+        assert_eq!(
+            sanitize_problem_text("  Bad\n\trequest\u{0000}  ".to_owned(), 7).as_deref(),
+            Some("Bad req")
         );
     }
 
@@ -597,6 +719,23 @@ mod tests {
             .get_listing_bid_summary(7)
             .await
             .unwrap_or_else(|error| panic!("public bid summary should decode: {error}"));
+        let summary_json = serde_json::to_value(&summary)
+            .unwrap_or_else(|error| panic!("bid summary should serialize: {error}"));
+        let summary_keys = summary_json
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("bid summary should be an object"));
+        assert_eq!(
+            summary_keys,
+            BTreeSet::from([
+                "bid_count",
+                "current_bid",
+                "end_time",
+                "listing_id",
+                "listing_status",
+                "reserve_price_met",
+            ])
+        );
         assert_eq!(summary.bid_count, None);
         assert_eq!(
             summary.current_bid.map(|money| money.amount).as_deref(),
@@ -609,8 +748,9 @@ mod tests {
         let server = MockServer::start().await;
         for (listing_id, approved, status) in [
             (10, false, "active"),
-            (11, true, "not_public"),
-            (12, true, "unknown"),
+            (11, true, "draft"),
+            (12, true, "cancelled"),
+            (13, true, "unknown"),
         ] {
             Mock::given(method("GET"))
                 .and(path(format!("/api/v1/listings/{listing_id}")))
@@ -638,6 +778,11 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/categories"))
+            .and(query_param("page", "1"))
+            .and(query_param("limit", "100"))
+            .and(query_param("parent_id", "2"))
+            .and(query_param("include_filters", "false"))
+            .and(query_param("translations", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "success": true,
                 "data": {
@@ -696,7 +841,10 @@ mod tests {
             .await;
 
         let categories = client(&server)
-            .list_categories(CategoryListRequest::default())
+            .list_categories(CategoryListRequest {
+                parent_id: Some(2),
+                ..CategoryListRequest::default()
+            })
             .await
             .unwrap_or_else(|error| panic!("categories should decode: {error}"));
         assert_eq!(
@@ -750,7 +898,7 @@ mod tests {
                 "success": true,
                 "data": {
                     "items": [],
-                    "pagination": {"page": 1, "limit": 100, "total": 0, "total_pages": 0}
+                    "pagination": {"page": 1, "limit": 100, "total": 0, "total_pages": 1}
                 }
             })))
             .mount(&server)

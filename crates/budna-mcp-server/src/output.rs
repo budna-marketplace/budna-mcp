@@ -1,6 +1,6 @@
 use budna_mcp_client::{
     BuyerProtectionConfig, CategoryPage, CategoryTranslations, FacetCount, ListingLocation,
-    ListingResponse, ListingSearchResult, Money, Pagination, PublicBadge, SearchFacets,
+    ListingResponse, ListingSearchResult, Money, Pagination, PriceStats, PublicBadge, SearchFacets,
     SellerProfileSummary, TranslationMap,
 };
 use rmcp::schemars;
@@ -109,6 +109,7 @@ pub struct SearchFacetsOutput {
     pub regions: Vec<FacetCount>,
     pub cities: Vec<FacetCount>,
     pub allow_pickup: Vec<FacetCount>,
+    pub price_stats: Option<PriceStats>,
 }
 
 impl From<SearchFacets> for SearchFacetsOutput {
@@ -122,6 +123,7 @@ impl From<SearchFacets> for SearchFacetsOutput {
             regions: facets.regions,
             cities: facets.cities,
             allow_pickup: facets.allow_pickup,
+            price_stats: facets.price_stats,
         }
     }
 }
@@ -339,7 +341,7 @@ pub struct SellerProfileOutput {
     pub country: Option<String>,
     pub level: Option<i32>,
     pub level_name: Option<String>,
-    pub badges: Vec<BadgeOutput>,
+    pub badges: Option<Vec<BadgeOutput>>,
 }
 
 impl From<SellerProfileSummary> for SellerProfileOutput {
@@ -370,10 +372,7 @@ impl From<SellerProfileSummary> for SellerProfileOutput {
             level_name: profile.level_name,
             badges: profile
                 .unlocked_badges
-                .unwrap_or_default()
-                .into_iter()
-                .map(BadgeOutput::from)
-                .collect(),
+                .map(|badges| badges.into_iter().map(BadgeOutput::from).collect()),
         }
     }
 }
@@ -415,6 +414,141 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn search_projection_matches_the_public_allowlist() {
+        let result = serde_json::from_value::<ListingSearchResult>(json!({
+            "hits": [{
+                "id": 7,
+                "seller_id": 42,
+                "title": "Camera",
+                "category_id": 12,
+                "category_name": "Cameras",
+                "category_breadcrumb": "Electronics > Cameras",
+                "condition": "good",
+                "listing_type": "auction",
+                "currency": "NOK",
+                "market": "norwegian",
+                "starting_price": "100.00",
+                "current_bid": "120.00",
+                "buy_now_price": null,
+                "shipping_cost": "49.00",
+                "free_shipping": false,
+                "status": "active",
+                "start_time": 1_700_000_000_000_i64,
+                "end_time": 1_800_000_000_000_i64,
+                "featured": false,
+                "tags": ["camera"],
+                "image_ids": ["123e4567-e89b-12d3-a456-426614174000"],
+                "primary_image_id": "123e4567-e89b-12d3-a456-426614174000",
+                "ending_soon": false,
+                "has_bids": true,
+                "server_only_marker": "ignored"
+            }],
+            "total": 1,
+            "page": 1,
+            "per_page": 10,
+            "total_pages": 1,
+            "search_time_ms": 3,
+            "facets": {
+                "categories": [{"value": "12", "count": 1}],
+                "conditions": [],
+                "listing_types": [],
+                "markets": [],
+                "statuses": [],
+                "regions": [],
+                "cities": [],
+                "allow_pickup": [],
+                "price_stats": {"min": "100.00", "max": "120.00", "avg": "110.00"},
+                "server_only_marker": "ignored"
+            }
+        }))
+        .unwrap_or_else(|error| panic!("search fixture should decode: {error}"));
+
+        let output = serde_json::to_value(ListingSearchOutput::from(result))
+            .unwrap_or_else(|error| panic!("search projection should serialize: {error}"));
+        let root_keys = output
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("search projection should be an object"));
+        assert_eq!(
+            root_keys,
+            BTreeSet::from([
+                "content_notice",
+                "facets",
+                "hits",
+                "page",
+                "per_page",
+                "search_time_ms",
+                "total",
+                "total_pages",
+            ])
+        );
+
+        let hit_keys = output
+            .pointer("/hits/0")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("search card should be an object"));
+        assert_eq!(
+            hit_keys,
+            BTreeSet::from([
+                "buy_now_price",
+                "category_breadcrumb",
+                "category_id",
+                "category_name",
+                "condition",
+                "currency",
+                "current_bid",
+                "end_time",
+                "ending_soon",
+                "featured",
+                "free_shipping",
+                "has_bids",
+                "id",
+                "image_ids",
+                "listing_type",
+                "market",
+                "primary_image_id",
+                "seller_id",
+                "shipping_cost",
+                "start_time",
+                "starting_price",
+                "status",
+                "tags",
+                "title",
+            ])
+        );
+        assert_eq!(
+            output.pointer("/hits/0/starting_price"),
+            Some(&json!({"amount": "100.00", "currency_code": "NOK"}))
+        );
+
+        let facet_keys = output
+            .pointer("/facets")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("search facets should be an object"));
+        assert_eq!(
+            facet_keys,
+            BTreeSet::from([
+                "allow_pickup",
+                "categories",
+                "cities",
+                "conditions",
+                "listing_types",
+                "markets",
+                "price_stats",
+                "regions",
+                "statuses",
+            ])
+        );
+        assert_eq!(
+            output.pointer("/facets/price_stats/avg"),
+            Some(&json!("110.00"))
+        );
+        assert!(!output.to_string().contains("server_only_marker"));
+    }
 
     #[test]
     fn listing_projection_is_allowlisted_and_marks_untrusted_text() {
@@ -535,5 +669,88 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|notice| notice.contains("All marketplace and profile text"))
         );
+    }
+
+    #[test]
+    fn profile_projection_preserves_badge_enrichment_state() {
+        let mut profile = serde_json::from_value::<SellerProfileSummary>(json!({
+            "id": 5,
+            "user_id": 42,
+            "username": "seller42",
+            "display_name": "Public seller",
+            "bio": "Camera enthusiast",
+            "language": "norwegian",
+            "currency": "NOK",
+            "auction_history": {
+                "won_auctions_count": 4,
+                "sold_items_count": 9,
+                "server_only_marker": "ignored"
+            },
+            "verification_status": {
+                "id_verified": true,
+                "server_only_marker": "ignored"
+            },
+            "rating": "4.9",
+            "total_ratings": 12,
+            "image_id": null,
+            "categories": ["Cameras"],
+            "is_company": false,
+            "created_at": 1_700_000_000_000_i64,
+            "followers_count": 8,
+            "following_count": 2,
+            "city": "Oslo",
+            "country": "NO",
+            "level": 3,
+            "level_name": "Trusted",
+            "unlocked_badges": null,
+            "server_only_marker": "ignored"
+        }))
+        .unwrap_or_else(|error| panic!("profile fixture should decode: {error}"));
+
+        let unavailable = serde_json::to_value(SellerProfileOutput::from(profile.clone()))
+            .unwrap_or_else(|error| panic!("profile projection should serialize: {error}"));
+        let keys = unavailable
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("profile projection should be an object"));
+        assert_eq!(
+            keys,
+            BTreeSet::from([
+                "badges",
+                "bio",
+                "categories",
+                "city",
+                "content_notice",
+                "country",
+                "created_at",
+                "currency",
+                "display_name",
+                "followers_count",
+                "following_count",
+                "identity_verified",
+                "image_id",
+                "is_company",
+                "language",
+                "level",
+                "level_name",
+                "profile_id",
+                "rating",
+                "seller_id",
+                "sold_items_count",
+                "total_ratings",
+                "username",
+                "won_auctions_count",
+            ])
+        );
+        assert_eq!(
+            unavailable.pointer("/badges"),
+            Some(&serde_json::Value::Null)
+        );
+        assert!(!unavailable.to_string().contains("server_only_marker"));
+
+        profile.unlocked_badges = Some(Vec::new());
+        let empty = serde_json::to_value(SellerProfileOutput::from(profile))
+            .unwrap_or_else(|error| panic!("profile projection should serialize: {error}"));
+        assert_eq!(empty.pointer("/badges"), Some(&json!([])));
     }
 }

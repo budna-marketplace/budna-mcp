@@ -133,6 +133,14 @@ pub struct SearchFacets {
     pub regions: Vec<FacetCount>,
     pub cities: Vec<FacetCount>,
     pub allow_pickup: Vec<FacetCount>,
+    pub price_stats: Option<PriceStats>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct PriceStats {
+    pub min: String,
+    pub max: String,
+    pub avg: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

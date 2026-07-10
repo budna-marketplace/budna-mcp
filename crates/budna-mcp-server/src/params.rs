@@ -133,6 +133,13 @@ impl SearchListingsParams {
 
         let min_price = normalize_search_price("min_price", self.min_price)?;
         let max_price = normalize_search_price("max_price", self.max_price)?;
+        if let (Some(min_price), Some(max_price)) = (&min_price, &max_price)
+            && search_price_whole_units(min_price)? > search_price_whole_units(max_price)?
+        {
+            return Err(InputError::new(
+                "min_price must not be greater than max_price",
+            ));
+        }
 
         let sort_by = trimmed(self.sort_by);
         validate_max_chars("sort_by", sort_by.as_deref(), 50)?;
@@ -466,6 +473,12 @@ fn normalize_search_price(
     Ok(Some(normalized))
 }
 
+fn search_price_whole_units(value: &str) -> Result<u64, InputError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| search_price_error("price"))
+}
+
 fn search_price_error(field: &str) -> InputError {
     InputError::new(format!(
         "{field} must use whole major currency units no greater than {MAX_SEARCH_PRICE_MAJOR_UNITS}"
@@ -595,7 +608,7 @@ mod tests {
     fn whole_price_filters_are_normalized() {
         let params = SearchListingsParams {
             min_price: Some("0010.00".to_owned()),
-            max_price: Some("2000".to_owned()),
+            max_price: Some("2000.00".to_owned()),
             ..SearchListingsParams::default()
         };
 
@@ -607,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn fractional_prices_and_filter_syntax_are_rejected() {
+    fn invalid_price_ranges_and_filter_syntax_are_rejected() {
         let fractional = SearchListingsParams {
             min_price: Some("10.50".to_owned()),
             ..SearchListingsParams::default()
@@ -619,6 +632,13 @@ mod tests {
             ..SearchListingsParams::default()
         };
         assert!(overflowing.into_request().is_err());
+
+        let reversed = SearchListingsParams {
+            min_price: Some("21".to_owned()),
+            max_price: Some("20".to_owned()),
+            ..SearchListingsParams::default()
+        };
+        assert!(reversed.into_request().is_err());
 
         let injected = SearchListingsParams {
             custom_filters: Some(BTreeMap::from([(

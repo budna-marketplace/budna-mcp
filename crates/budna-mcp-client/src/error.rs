@@ -121,10 +121,13 @@ impl ClientError {
         }
     }
 
-    pub const fn retryable(&self) -> bool {
+    pub fn retryable(&self) -> bool {
         match self {
             Self::Request { .. } => true,
-            Self::Api { status, .. } => matches!(status, 429 | 502 | 503 | 504),
+            Self::Api { status, code, .. } => {
+                matches!(status, 429 | 502 | 503 | 504)
+                    || code.as_deref().is_some_and(is_retryable_problem_code)
+            }
             _ => false,
         }
     }
@@ -165,6 +168,20 @@ impl ClientError {
     }
 }
 
+fn is_retryable_problem_code(code: &str) -> bool {
+    matches!(
+        code,
+        "RATE_LIMIT_EXCEEDED"
+            | "TOO_MANY_LOGIN_ATTEMPTS"
+            | "DAILY_LIMIT_EXCEEDED"
+            | "SERVICE_UNAVAILABLE"
+            | "DATABASE_UNAVAILABLE"
+            | "EXTERNAL_SERVICE_UNAVAILABLE"
+            | "TIMEOUT"
+            | "CACHE_UNAVAILABLE"
+    )
+}
+
 fn truncate(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let truncated: String = chars.by_ref().take(max_chars).collect();
@@ -172,5 +189,30 @@ fn truncate(value: &str, max_chars: usize) -> String {
         format!("{truncated}…")
     } else {
         truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn api_error(status: u16, code: Option<&str>) -> ClientError {
+        ClientError::Api {
+            operation: "test",
+            status,
+            code: code.map(str::to_owned),
+            title: None,
+            detail: None,
+            retry_after: None,
+        }
+    }
+
+    #[test]
+    fn retryability_matches_problem_code_semantics() {
+        assert!(api_error(500, Some("TIMEOUT")).retryable());
+        assert!(api_error(500, Some("CACHE_UNAVAILABLE")).retryable());
+        assert!(api_error(429, None).retryable());
+        assert!(!api_error(500, Some("INTERNAL_ERROR")).retryable());
+        assert!(!api_error(404, Some("LISTING_NOT_FOUND")).retryable());
     }
 }
