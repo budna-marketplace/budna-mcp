@@ -109,7 +109,18 @@ impl PublicApiClient {
     ) -> Result<SellerProfileSummary, ClientError> {
         const OPERATION: &str = "get_public_seller_profile";
         let url = self.endpoint(OPERATION, &format!("profiles/{seller_id}"))?;
-        self.get_required(OPERATION, self.http.get(url)).await
+        let profile: SellerProfileSummary =
+            self.get_required(OPERATION, self.http.get(url)).await?;
+
+        if profile.user_id == seller_id {
+            Ok(profile)
+        } else {
+            Err(public_resource_unavailable(
+                OPERATION,
+                "SELLER_PROFILE_NOT_FOUND",
+                "Seller profile not found",
+            ))
+        }
     }
 
     pub async fn get_listing_bid_summary(
@@ -882,6 +893,59 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("profile should decode: {error}"));
         assert_eq!(profile.auction_history.won_auctions_count, 4_294_967_296);
+    }
+
+    #[tokio::test]
+    async fn seller_profile_user_id_mismatch_fails_closed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/profiles/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "id": 5,
+                    "user_id": 99,
+                    "username": "seller99",
+                    "display_name": "Public seller",
+                    "bio": null,
+                    "language": "norwegian",
+                    "currency": "NOK",
+                    "auction_history": {
+                        "won_auctions_count": 0,
+                        "sold_items_count": 0
+                    },
+                    "verification_status": {
+                        "id_verified": false
+                    },
+                    "rating": "0",
+                    "total_ratings": 0,
+                    "image_id": null,
+                    "categories": [],
+                    "is_company": false,
+                    "created_at": 1_700_000_000_000_i64,
+                    "followers_count": null,
+                    "following_count": null,
+                    "city": null,
+                    "country": null,
+                    "level": null,
+                    "level_name": null,
+                    "unlocked_badges": null
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let error = match client(&server).get_public_seller_profile(42).await {
+            Ok(_) => panic!("mismatched seller profile should fail closed"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status(), Some(404));
+        assert_eq!(error.code(), Some("SELLER_PROFILE_NOT_FOUND"));
+        assert_eq!(
+            error.public_message(),
+            "Seller profile not found (HTTP 404)"
+        );
     }
 
     #[tokio::test]

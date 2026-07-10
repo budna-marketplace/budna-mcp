@@ -8,6 +8,7 @@ const MAX_SEARCH_RESULTS: u32 = 50;
 const MAX_SEARCH_PAGE: u32 = 10_000;
 const MAX_SEARCH_PRICE_MAJOR_UNITS: &str = "1000000000000";
 const MAX_CATEGORY_RESULTS: i32 = 200;
+const MAX_CATEGORY_PAGE: i32 = 10_000;
 const MAX_CUSTOM_FILTERS: usize = 20;
 
 #[derive(Debug)]
@@ -210,7 +211,7 @@ impl SearchListingsParams {
 #[serde(deny_unknown_fields)]
 pub struct GetCategoriesParams {
     /// One-indexed result page. Defaults to 1.
-    #[schemars(range(min = 1))]
+    #[schemars(range(min = 1, max = 10000))]
     pub page: Option<i32>,
 
     /// Categories per page. Defaults to 100 and is capped at 200 for bounded MCP output.
@@ -228,8 +229,8 @@ pub struct GetCategoriesParams {
 impl GetCategoriesParams {
     pub fn into_request(self) -> Result<CategoryListRequest, InputError> {
         let page = self.page.unwrap_or(1);
-        if page < 1 {
-            return Err(InputError::new("page must be at least 1"));
+        if !(1..=MAX_CATEGORY_PAGE).contains(&page) {
+            return Err(InputError::new("page must be between 1 and 10000"));
         }
 
         let limit = self.limit.unwrap_or(100);
@@ -602,6 +603,20 @@ mod tests {
             ..SearchListingsParams::default()
         };
         assert!(invalid_filter.into_request().is_err());
+    }
+
+    #[test]
+    fn category_pages_are_bounded() {
+        let invalid_page = GetCategoriesParams {
+            page: Some(MAX_CATEGORY_PAGE + 1),
+            ..GetCategoriesParams::default()
+        };
+
+        let error = match invalid_page.into_request() {
+            Ok(_) => panic!("oversized category page should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.message(), "page must be between 1 and 10000");
     }
 
     #[test]
