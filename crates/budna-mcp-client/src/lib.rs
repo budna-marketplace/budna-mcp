@@ -4,7 +4,7 @@ mod config;
 mod error;
 mod models;
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use reqwest::{
     Client, RequestBuilder,
@@ -29,6 +29,7 @@ use crate::models::{ApiEnvelope, ProblemDetails, PublicListingWire};
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_GET_ATTEMPTS: u32 = 3;
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(200);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const ACCEPTED_RESPONSE_MEDIA_TYPES: &str = "application/json, application/problem+json";
 const MAX_PROBLEM_TITLE_CHARS: usize = 120;
 const MAX_PROBLEM_DETAIL_CHARS: usize = 500;
@@ -200,9 +201,20 @@ impl PublicApiClient {
                     return Ok(value);
                 }
                 Err(error) if error.retryable() && attempt < MAX_GET_ATTEMPTS => {
-                    let delay = retry_after(&error)
-                        .unwrap_or(retry_delay)
-                        .min(Duration::from_secs(5));
+                    let requested_delay = retry_after(&error);
+                    if requested_delay.is_some_and(|delay| delay > MAX_RETRY_DELAY) {
+                        tracing::warn!(
+                            operation,
+                            attempt,
+                            elapsed_ms,
+                            error.kind = error.kind(),
+                            http.status = error.status(),
+                            retry_after_ms = requested_delay.map(|delay| delay.as_millis() as u64),
+                            "Budna API retry delay exceeds the interactive wait budget"
+                        );
+                        return Err(error);
+                    }
+                    let delay = requested_delay.unwrap_or(retry_delay).min(MAX_RETRY_DELAY);
                     tracing::warn!(
                         operation,
                         attempt,
@@ -350,10 +362,20 @@ fn request_error(operation: &'static str, source: reqwest::Error) -> ClientError
 }
 
 fn parse_retry_after(value: Option<&reqwest::header::HeaderValue>) -> Option<Duration> {
-    value
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_secs)
+    parse_retry_after_at(value, SystemTime::now())
+}
+
+fn parse_retry_after_at(
+    value: Option<&reqwest::header::HeaderValue>,
+    now: SystemTime,
+) -> Option<Duration> {
+    let value = value.and_then(|value| value.to_str().ok())?;
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    let retry_at = httpdate::parse_http_date(value).ok()?;
+    Some(retry_at.duration_since(now).unwrap_or(Duration::ZERO))
 }
 
 fn retry_after(error: &ClientError) -> Option<Duration> {
@@ -910,6 +932,46 @@ mod tests {
         drop(transient);
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn long_retry_after_is_returned_without_an_early_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/categories"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "30"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let error = match client(&server)
+            .list_categories(CategoryListRequest::default())
+            .await
+        {
+            Ok(_) => panic!("rate-limited request should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status(), Some(429));
+        assert!(error.retryable());
+    }
+
+    #[test]
+    fn retry_after_accepts_delta_seconds_and_http_dates() {
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let delta = reqwest::header::HeaderValue::from_static("30");
+        assert_eq!(
+            parse_retry_after_at(Some(&delta), now),
+            Some(Duration::from_secs(30))
+        );
+
+        let date = httpdate::fmt_http_date(now + Duration::from_secs(45));
+        let date = reqwest::header::HeaderValue::try_from(date.as_str())
+            .unwrap_or_else(|error| panic!("HTTP date should be a valid header: {error}"));
+        assert_eq!(
+            parse_retry_after_at(Some(&date), now),
+            Some(Duration::from_secs(45))
+        );
     }
 
     #[tokio::test]

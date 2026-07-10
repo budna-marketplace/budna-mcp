@@ -35,6 +35,7 @@ budna-mcp-client = { version = "0.1.0", path = "crates/budna-mcp-client" }
 budna-mcp-core = { version = "0.1.0", path = "crates/budna-mcp-core" }
 budna-mcp-server = { version = "0.1.0", path = "crates/budna-mcp-server" }
 clap = { version = "4", features = ["derive", "env"] }
+httpdate = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 rmcp = { version = "2.2", features = ["macros", "server", "transport-io"] }
 schemars = "1"

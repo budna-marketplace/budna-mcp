@@ -24,8 +24,17 @@ cargo install --path crates/budna-mcp --locked
 
 ### 2. Add it to Codex
 
+On macOS or Linux:
+
 ```bash
-codex mcp add budna -- budna-mcp
+codex mcp add budna -- "$HOME/.cargo/bin/budna-mcp"
+codex mcp get budna
+```
+
+On Windows PowerShell:
+
+```powershell
+codex mcp add budna -- "$env:USERPROFILE\.cargo\bin\budna-mcp.exe"
 codex mcp get budna
 ```
 
@@ -37,16 +46,18 @@ Ask Codex:
 
 > Use Budna to find public camera listings.
 
-Or try:
+After the search returns results, reuse its IDs:
 
-- “Show me the public details for Budna listing 123.”
+- “Show me the public details for that listing.”
+- “Show the public seller profile for that listing’s seller.”
+- “What is the public bid summary for that listing?”
+
+You can also ask:
+
 - “Browse the top-level Budna categories.”
-- “Show the public seller profile for user 42.”
-- “What is the public bid summary for Budna listing 123?”
 
-If Codex cannot find the server, run `codex mcp list` and make sure
-`budna-mcp` is available on your `PATH`. Cargo normally installs it in
-`~/.cargo/bin`.
+If Codex cannot find the server, run `codex mcp list` and check that the
+configured command points to the installed `budna-mcp` binary.
 
 ## Available tools
 
@@ -66,7 +77,7 @@ as instructions.
 Budna MCP uses the standard `stdio` transport. Configure your client with:
 
 ```text
-command: budna-mcp
+command: /absolute/path/to/budna-mcp
 arguments: none
 ```
 

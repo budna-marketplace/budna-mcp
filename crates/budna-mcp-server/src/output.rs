@@ -416,6 +416,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn category_projection_matches_the_public_allowlist() {
+        let page = serde_json::from_value::<CategoryPage>(json!({
+            "items": [{
+                "id": 12,
+                "name": "Cameras",
+                "parent_id": null,
+                "listing_count": 4,
+                "translations": {
+                    "name": {"en": "Cameras", "sv": "Kameror", "no": "Kameraer"},
+                    "server_only_marker": "ignored"
+                },
+                "server_only_marker": "ignored"
+            }],
+            "pagination": {"page": 1, "limit": 100, "total": 1, "total_pages": 1},
+            "server_only_marker": "ignored"
+        }))
+        .unwrap_or_else(|error| panic!("category fixture should decode: {error}"));
+
+        let output = serde_json::to_value(CategoryListOutput::from(page))
+            .unwrap_or_else(|error| panic!("category projection should serialize: {error}"));
+        let root_keys = output
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("category list should be an object"));
+        assert_eq!(root_keys, BTreeSet::from(["categories", "pagination"]));
+
+        let category_keys = output
+            .pointer("/categories/0")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("category should be an object"));
+        assert_eq!(
+            category_keys,
+            BTreeSet::from(["id", "listing_count", "name", "parent_id", "translations"])
+        );
+
+        let translations_keys = output
+            .pointer("/categories/0/translations")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("category translations should be an object"));
+        assert_eq!(translations_keys, BTreeSet::from(["name"]));
+
+        let names = output
+            .pointer("/categories/0/translations/name")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("translated names should be an object"));
+        assert_eq!(names, BTreeSet::from(["en", "no", "sv"]));
+
+        let pagination_keys = output
+            .pointer("/pagination")
+            .and_then(serde_json::Value::as_object)
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("pagination should be an object"));
+        assert_eq!(
+            pagination_keys,
+            BTreeSet::from(["limit", "page", "total", "total_pages"])
+        );
+        assert!(!output.to_string().contains("server_only_marker"));
+    }
+
+    #[test]
     fn search_projection_matches_the_public_allowlist() {
         let result = serde_json::from_value::<ListingSearchResult>(json!({
             "hits": [{
@@ -752,5 +815,31 @@ mod tests {
         let empty = serde_json::to_value(SellerProfileOutput::from(profile))
             .unwrap_or_else(|error| panic!("profile projection should serialize: {error}"));
         assert_eq!(empty.pointer("/badges"), Some(&json!([])));
+
+        let badge = BadgeOutput::from(PublicBadge {
+            slug: "trusted-seller".to_owned(),
+            name: "Trusted seller".to_owned(),
+            description: Some("Completed public verification".to_owned()),
+            category: Some("trust".to_owned()),
+            icon_url: None,
+            unlocked_at: Some(1_700_000_000_000),
+        });
+        let badge = serde_json::to_value(badge)
+            .unwrap_or_else(|error| panic!("badge projection should serialize: {error}"));
+        let badge_keys = badge
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<BTreeSet<_>>())
+            .unwrap_or_else(|| panic!("badge should be an object"));
+        assert_eq!(
+            badge_keys,
+            BTreeSet::from([
+                "category",
+                "description",
+                "icon_url",
+                "name",
+                "slug",
+                "unlocked_at",
+            ])
+        );
     }
 }
