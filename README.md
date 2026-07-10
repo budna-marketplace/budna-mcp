@@ -1,6 +1,8 @@
 # Budna MCP
 
 [![build](https://img.shields.io/github/actions/workflow/status/budna-marketplace/budna-mcp/core.yml?branch=main)](https://github.com/budna-marketplace/budna-mcp/actions/workflows/core.yml)
+[![crates.io](https://img.shields.io/crates/v/budna-mcp.svg)](https://crates.io/crates/budna-mcp)
+[![documentation](https://img.shields.io/badge/docs-budna-mcp-blue?logo=rust)](https://docs.rs/budna-mcp/latest/)
 
 Explore public Budna marketplace listings from any compatible MCP client.
 
