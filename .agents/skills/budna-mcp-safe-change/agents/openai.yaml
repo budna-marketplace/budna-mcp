@@ -1,0 +1,4 @@
+interface:
+  display_name: "Budna MCP Safe Change"
+  short_description: "Change public MCP tools with strict safety"
+  default_prompt: "Use $budna-mcp-safe-change to make this MCP change safely and verify the public boundary."
