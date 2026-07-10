@@ -9,11 +9,17 @@ Keep every change self-contained, capability-gated, privacy-safe, and verifiable
 
 ## Establish the boundary
 
-1. Read the root `AGENTS.md` and work only inside the repository root.
+1. Read the root `AGENTS.md` and keep committed changes inside the repository
+   root.
 2. Use repository-local code, synthetic fixtures, explicitly public API behavior,
-   or sanitized contract material supplied for publication.
-3. Do not inspect outside files, add local path dependencies, or record raw API
-   responses. Request a sanitized public contract when evidence is incomplete.
+   sanitized contract material supplied for publication, or private local
+   research conclusions that the user has explicitly approved for publication.
+3. You may inspect the local Budna application checkout and development API
+   URLs as confidential research context when the user asks for product/API
+   alignment. Do not add local path dependencies, record raw API responses, or
+   publish private source, endpoint, payload, or implementation details unless
+   the user explicitly asks for that exact disclosure.
+   Request a sanitized public contract when evidence is incomplete.
 4. Keep the current Explore profile limited to approved public GET behavior.
    Treat future authenticated capabilities as separate profiles with their own
    authorization and confirmation design.

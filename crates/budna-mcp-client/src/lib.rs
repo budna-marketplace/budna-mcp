@@ -17,14 +17,16 @@ use thiserror::Error;
 pub use config::{ClientConfig, ClientConfigError, DEFAULT_REQUEST_TIMEOUT};
 pub use error::{ClientError, RequestFailureKind};
 pub use models::{
-    BuyerProtectionConfig, CategoryListRequest, CategoryPage, CategorySummary,
-    CategoryTranslations, FacetCount, ListingBidSummary, ListingLocation, ListingResponse,
-    ListingSearchResult, Money, Pagination, PriceStats, PublicAuctionHistory, PublicBadge,
-    PublicVerificationStatus, SearchFacets, SearchListingHit, SearchListingsRequest,
-    SellerProfileSummary, TranslationMap,
+    AttributeValue, BuyerProtectionConfig, CategoryFilters, CategoryListRequest, CategoryPage,
+    CategorySummary, CategoryTranslations, CategoryWithFilters, FacetCount, FilterConfiguration,
+    FilterDefinition, FilterOption, FilterOptionList, FilterOptionTranslations, FilterTranslations,
+    FilterWithOptions, ListingAttribute, ListingAttributes, ListingBidSummary, ListingLocation,
+    ListingPage, ListingResponse, ListingSearchResult, Money, Pagination, PriceStats,
+    PublicAuctionHistory, PublicBadge, PublicVerificationStatus, RatingSummary, SearchFacets,
+    SearchListingHit, SearchListingsRequest, SellerProfileSummary, TranslationMap, ValidationRules,
 };
 
-use crate::models::{ApiEnvelope, ProblemDetails, PublicListingWire};
+use crate::models::{ApiEnvelope, ProblemDetails, PublicListingPageWire, PublicListingWire};
 
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_GET_ATTEMPTS: u32 = 3;
@@ -87,6 +89,63 @@ impl PublicApiClient {
         self.get_public_listing(OPERATION, listing_id).await
     }
 
+    pub async fn get_listing_attributes(
+        &self,
+        listing_id: i64,
+    ) -> Result<ListingAttributes, ClientError> {
+        const OPERATION: &str = "get_listing_attributes";
+        self.get_public_listing(OPERATION, listing_id).await?;
+        let url = self.endpoint(OPERATION, &format!("listings/{listing_id}/attributes"))?;
+        let attributes: ListingAttributes =
+            self.get_required(OPERATION, self.http.get(url)).await?;
+
+        if attributes.listing_id == listing_id
+            && attributes
+                .attributes
+                .iter()
+                .all(|attribute| attribute.listing_id == listing_id)
+        {
+            Ok(attributes)
+        } else {
+            Err(public_resource_unavailable(
+                OPERATION,
+                "LISTING_ATTRIBUTES_NOT_FOUND",
+                "Listing attributes not found",
+            ))
+        }
+    }
+
+    pub async fn get_related_listings(
+        &self,
+        listing_id: i64,
+        page: u32,
+        limit: u32,
+    ) -> Result<ListingPage, ClientError> {
+        const OPERATION: &str = "get_listing_related";
+        self.get_public_listing(OPERATION, listing_id).await?;
+        let url = self.endpoint(OPERATION, &format!("listings/{listing_id}/related"))?;
+        let request = self
+            .http
+            .get(url)
+            .query(&[("page", page), ("limit", limit)]);
+        self.get_public_listing_page(OPERATION, request).await
+    }
+
+    pub async fn get_seller_listings(
+        &self,
+        seller_id: i64,
+        page: u32,
+        limit: u32,
+    ) -> Result<ListingPage, ClientError> {
+        const OPERATION: &str = "get_seller_listings";
+        let url = self.endpoint(OPERATION, &format!("listings/seller/{seller_id}"))?;
+        let request = self
+            .http
+            .get(url)
+            .query(&[("page", page), ("limit", limit)]);
+        self.get_public_listing_page(OPERATION, request).await
+    }
+
     pub async fn list_categories(
         &self,
         query: CategoryListRequest,
@@ -101,6 +160,56 @@ impl PublicApiClient {
         self.list_categories(CategoryListRequest::default())
             .await
             .map(|page| page.items)
+    }
+
+    pub async fn get_category_filters(
+        &self,
+        category_id: i32,
+        translations: bool,
+    ) -> Result<CategoryWithFilters, ClientError> {
+        const OPERATION: &str = "get_category_filters";
+        let url = self.endpoint(OPERATION, &format!("categories/{category_id}"))?;
+        let request = self
+            .http
+            .get(url)
+            .query(&[("include_filters", true), ("translations", translations)]);
+        let category: CategoryWithFilters = self.get_required(OPERATION, request).await?;
+
+        if category.id == category_id {
+            Ok(category)
+        } else {
+            Err(public_resource_unavailable(
+                OPERATION,
+                "CATEGORY_NOT_FOUND",
+                "Category not found",
+            ))
+        }
+    }
+
+    pub async fn get_filter_options(
+        &self,
+        filter_id: i32,
+        translations: bool,
+    ) -> Result<FilterOptionList, ClientError> {
+        const OPERATION: &str = "get_filter_options";
+        let url = self.endpoint(OPERATION, &format!("filters/{filter_id}/options"))?;
+        let request = self.http.get(url).query(&[("translations", translations)]);
+        let options: FilterOptionList = self.get_required(OPERATION, request).await?;
+
+        if options.filter_id == filter_id
+            && options
+                .options
+                .iter()
+                .all(|option| option.filter_id == filter_id)
+        {
+            Ok(options)
+        } else {
+            Err(public_resource_unavailable(
+                OPERATION,
+                "FILTER_OPTIONS_NOT_FOUND",
+                "Filter options not found",
+            ))
+        }
     }
 
     pub async fn get_public_seller_profile(
@@ -140,6 +249,26 @@ impl PublicApiClient {
         })
     }
 
+    pub async fn get_public_rating_summary(
+        &self,
+        listing_id: i64,
+    ) -> Result<RatingSummary, ClientError> {
+        const OPERATION: &str = "get_public_ratings_summary";
+        self.get_public_listing(OPERATION, listing_id).await?;
+        let url = self.endpoint(OPERATION, &format!("ratings/listing/{listing_id}/summary"))?;
+        let summary: RatingSummary = self.get_required(OPERATION, self.http.get(url)).await?;
+
+        if summary.listing_id == listing_id {
+            Ok(summary)
+        } else {
+            Err(public_resource_unavailable(
+                OPERATION,
+                "RATING_SUMMARY_NOT_FOUND",
+                "Rating summary not found",
+            ))
+        }
+    }
+
     async fn get_public_listing(
         &self,
         operation: &'static str,
@@ -155,6 +284,31 @@ impl PublicApiClient {
                 operation,
                 "LISTING_NOT_FOUND",
                 "Listing not found",
+            ))
+        }
+    }
+
+    async fn get_public_listing_page(
+        &self,
+        operation: &'static str,
+        request: RequestBuilder,
+    ) -> Result<ListingPage, ClientError> {
+        let wire: PublicListingPageWire = self.get_required(operation, request).await?;
+
+        if wire
+            .items
+            .iter()
+            .all(|item| item.approved && is_public_listing_status(&item.listing.status))
+        {
+            Ok(ListingPage {
+                items: wire.items.into_iter().map(|item| item.listing).collect(),
+                pagination: wire.pagination,
+            })
+        } else {
+            Err(public_resource_unavailable(
+                operation,
+                "LISTINGS_UNAVAILABLE",
+                "Listings unavailable",
             ))
         }
     }
@@ -512,6 +666,16 @@ mod tests {
                 "server_only_marker": "ignored"
             }
         })
+    }
+
+    fn listing_data(
+        listing_id: i64,
+        approved: bool,
+        status: &str,
+        bid_count: Option<i64>,
+    ) -> serde_json::Value {
+        let mut envelope = listing_envelope(listing_id, approved, status, bid_count);
+        envelope["data"].take()
     }
 
     fn search_hit(listing_id: i64, status: &str) -> serde_json::Value {
@@ -946,6 +1110,330 @@ mod tests {
             error.public_message(),
             "Seller profile not found (HTTP 404)"
         );
+    }
+
+    #[tokio::test]
+    async fn listing_attributes_verify_public_listing_and_decode_safe_values() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/7"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(listing_envelope(7, true, "active", None)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/7/attributes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "listing_id": 7,
+                    "attributes": [
+                        {
+                            "id": 1,
+                            "listing_id": 7,
+                            "filter_definition_id": 277,
+                            "filter_name": "mount",
+                            "label": "Mount",
+                            "value": {"type": "String", "value": "sony-e"},
+                            "display_value": "Sony E",
+                            "created_at": 1_700_000_000_000_i64,
+                            "updated_at": 1_700_000_000_100_i64,
+                            "server_only_marker": "ignored"
+                        },
+                        {
+                            "id": 2,
+                            "listing_id": 7,
+                            "filter_definition_id": 278,
+                            "filter_name": "year",
+                            "label": "Year",
+                            "value": {"type": "Numeric", "value": "2021.0000"},
+                            "display_value": "2021",
+                            "created_at": 1_700_000_000_000_i64,
+                            "updated_at": 1_700_000_000_100_i64
+                        },
+                        {
+                            "id": 3,
+                            "listing_id": 7,
+                            "filter_definition_id": 279,
+                            "filter_name": "weather_sealed",
+                            "label": "Weather sealed",
+                            "value": {"type": "Boolean", "value": true},
+                            "display_value": "Yes",
+                            "created_at": 1_700_000_000_000_i64,
+                            "updated_at": 1_700_000_000_100_i64
+                        },
+                        {
+                            "id": 4,
+                            "listing_id": 7,
+                            "filter_definition_id": 280,
+                            "filter_name": "release_date",
+                            "label": "Release date",
+                            "value": {"type": "Date", "value": 1_600_000_000_000_i64},
+                            "display_value": "2020",
+                            "created_at": 1_700_000_000_000_i64,
+                            "updated_at": 1_700_000_000_100_i64
+                        },
+                        {
+                            "id": 5,
+                            "listing_id": 7,
+                            "filter_definition_id": 281,
+                            "filter_name": "details",
+                            "label": "Details",
+                            "value": {"type": "Json", "value": {"nested": "value"}},
+                            "display_value": "Complex details",
+                            "created_at": 1_700_000_000_000_i64,
+                            "updated_at": 1_700_000_000_100_i64
+                        }
+                    ],
+                    "server_only_marker": "ignored"
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let attributes = client(&server)
+            .get_listing_attributes(7)
+            .await
+            .unwrap_or_else(|error| panic!("attributes should decode: {error}"));
+
+        assert_eq!(attributes.listing_id, 7);
+        assert_eq!(attributes.attributes.len(), 5);
+        assert!(matches!(
+            attributes.attributes[1].value,
+            AttributeValue::Numeric(_)
+        ));
+        assert!(matches!(
+            attributes.attributes[4].value,
+            AttributeValue::Json(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn related_and_seller_listing_pages_decode_public_pages() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/7"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(listing_envelope(7, true, "active", None)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/7/related"))
+            .and(query_param("page", "2"))
+            .and(query_param("limit", "3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "items": [listing_data(8, true, "active", Some(1))],
+                    "pagination": {"page": 2, "limit": 3, "total": 1, "total_pages": 1}
+                }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/seller/42"))
+            .and(query_param("page", "1"))
+            .and(query_param("limit", "5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "items": [listing_data(9, true, "sold", Some(2))],
+                    "pagination": {"page": 1, "limit": 5, "total": 1, "total_pages": 1}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let related = client(&server)
+            .get_related_listings(7, 2, 3)
+            .await
+            .unwrap_or_else(|error| panic!("related listings should decode: {error}"));
+        assert_eq!(related.items[0].id, 8);
+        assert_eq!(related.pagination.page, 2);
+
+        let seller = client(&server)
+            .get_seller_listings(42, 1, 5)
+            .await
+            .unwrap_or_else(|error| panic!("seller listings should decode: {error}"));
+        assert_eq!(seller.items[0].status, "sold");
+    }
+
+    #[tokio::test]
+    async fn listing_pages_fail_closed_when_any_item_is_not_public() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/seller/42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "items": [listing_data(9, false, "active", Some(2))],
+                    "pagination": {"page": 1, "limit": 10, "total": 1, "total_pages": 1}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let error = match client(&server).get_seller_listings(42, 1, 10).await {
+            Ok(_) => panic!("non-public page item should fail closed"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status(), Some(404));
+        assert_eq!(error.code(), Some("LISTINGS_UNAVAILABLE"));
+    }
+
+    #[tokio::test]
+    async fn category_filters_and_filter_options_decode_public_contracts() {
+        let server = MockServer::start().await;
+        let filter_definition = json!({
+            "id": 277,
+            "name": "mount",
+            "label": "Mount",
+            "filter_type": "select",
+            "is_baseline": false,
+            "sortable": true,
+            "configuration": {
+                "placeholder": "Choose mount",
+                "min_value": null,
+                "max_value": null,
+                "step": null,
+                "unit": null,
+                "max_stars": null,
+                "multiple": false,
+                "required": false,
+                "searchable": true
+            },
+            "validation_rules": {
+                "min_length": null,
+                "max_length": null,
+                "pattern": null,
+                "required": false
+            },
+            "is_active": true,
+            "created_at": 1_700_000_000_000_i64,
+            "updated_at": 1_700_000_000_100_i64,
+            "translations": {
+                "label": {"en": "Mount", "sv": "Fattning", "no": "Fatning"}
+            },
+            "option_count": 1,
+            "server_only_marker": "ignored"
+        });
+        let filter_option = json!({
+            "id": 501,
+            "filter_id": 277,
+            "value": "sony-e",
+            "display_value": "Sony E",
+            "display_order": 1,
+            "metadata": {"server_only_marker": "ignored"},
+            "is_active": true,
+            "created_at": 1_700_000_000_000_i64,
+            "is_suggested": true,
+            "translations": {
+                "label": {"en": "Sony E", "sv": "Sony E", "no": "Sony E"}
+            }
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/v1/categories/12"))
+            .and(query_param("include_filters", "true"))
+            .and(query_param("translations", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "id": 12,
+                    "name": "Cameras",
+                    "parent_id": null,
+                    "listing_count": 4,
+                    "filters": {
+                        "baseline_filters": [],
+                        "category_filters": [{
+                            "definition": filter_definition,
+                            "options": [filter_option.clone()]
+                        }],
+                        "inherited_filters": []
+                    },
+                    "translations": {"name": {"en": "Cameras", "sv": "Kameror", "no": "Kameraer"}},
+                    "server_only_marker": "ignored"
+                }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/filters/277/options"))
+            .and(query_param("translations", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "options": [filter_option],
+                    "filter_id": 277,
+                    "total": 1,
+                    "server_only_marker": "ignored"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let category = client(&server)
+            .get_category_filters(12, true)
+            .await
+            .unwrap_or_else(|error| panic!("category filters should decode: {error}"));
+        assert_eq!(
+            category
+                .filters
+                .as_ref()
+                .map(|filters| filters.category_filters.len()),
+            Some(1)
+        );
+
+        let options = client(&server)
+            .get_filter_options(277, true)
+            .await
+            .unwrap_or_else(|error| panic!("filter options should decode: {error}"));
+        assert_eq!(options.total, 1);
+        assert_eq!(options.options[0].value, "sony-e");
+    }
+
+    #[tokio::test]
+    async fn rating_summary_verifies_public_listing_before_fetching_summary() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/listings/7"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(listing_envelope(7, true, "active", None)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/ratings/listing/7/summary"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "data": {
+                    "listing_id": 7,
+                    "total_ratings": 12,
+                    "average_rating": 4.5,
+                    "rating_distribution": [0, 0, 1, 4, 7],
+                    "total_comments": 3,
+                    "has_ratings": true,
+                    "has_comments": true,
+                    "most_common_rating": 5,
+                    "positive_percentage": 91.67
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let summary = client(&server)
+            .get_public_rating_summary(7)
+            .await
+            .unwrap_or_else(|error| panic!("rating summary should decode: {error}"));
+
+        assert_eq!(summary.listing_id, 7);
+        assert_eq!(summary.rating_distribution, [0, 0, 1, 4, 7]);
     }
 
     #[tokio::test]

@@ -7,11 +7,12 @@ The current release profile is deliberately limited to public marketplace
 exploration. Do not interpret that milestone boundary as a permanent
 read-only architecture.
 
-Current tools may call only public GET endpoints for listing discovery,
-listing details, category browsing, public seller profiles, and privacy-safe
-bid summaries. Do not add credentials, protected endpoints, mutations, view
-recording, contact submission, bidding, buying, messaging, or account actions
-to this profile.
+Current tools may call only approved public GET endpoints for listing
+discovery, listing details and attributes, related listing discovery, public
+seller listing discovery, category and filter browsing, public seller profiles,
+public rating summaries, and privacy-safe bid summaries. Do not add
+credentials, protected endpoints, mutations, view recording, contact
+submission, bidding, buying, messaging, or account actions to this profile.
 
 Future authenticated or state-changing capability profiles require an explicit
 design for authorization, secret storage, user consent/confirmation, CSRF,
@@ -35,22 +36,28 @@ profile.
 - Budna timestamps are Unix epoch milliseconds unless the backend contract
   explicitly says otherwise.
 
-## Standalone Repository Boundary
+## Research and Publication Boundary
 
 Treat this checkout as the complete workspace and source of truth.
 
-- Never inspect, search, read, cite, copy, or derive implementation details
-  from files outside this repository root.
+- You may inspect the local Budna application checkout at `~/Budna/budna`
+  and use development API URLs as private research context when the user asks
+  for product/API alignment. Treat that material as confidential evidence.
 - Never add absolute local paths, parent-relative dependencies, local file
   URLs, external-workspace symlinks, submodules, or machine-specific settings.
-- Never describe unavailable source trees, their layout, or their existence in
-  committed files, issues, releases, logs, generated output, or examples.
+- Never describe private source trees, their layout, development URLs, or their
+  implementation details in committed files, issues, releases, logs, generated
+  output, or examples unless the user explicitly asks for that exact disclosure.
 - Use only repository-local code and synthetic fixtures, explicitly public API
-  behavior, or sanitized public contract material supplied for publication.
+  behavior, sanitized public contract material supplied for publication, or
+  private research conclusions that the user has explicitly approved for this
+  repository.
 - Do not commit raw HTTP captures or real marketplace records. Reduce examples
   to the smallest synthetic shape required by a test.
 - When public contract evidence is incomplete, stop and request a sanitized,
-  publishable artifact. Do not guess and do not seek an external local source.
+  publishable artifact. You may use private local research to identify gaps,
+  but do not publish the private source, endpoint, payload, or implementation
+  detail behind that conclusion without explicit user approval.
 
 Response DTOs and MCP outputs are allowlists. Decode only fields needed by the
 current public capability and let Serde ignore additional response fields.

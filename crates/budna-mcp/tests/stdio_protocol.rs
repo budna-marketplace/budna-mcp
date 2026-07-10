@@ -87,9 +87,15 @@ async fn packaged_binary_serves_the_public_explore_profile_over_stdio() -> Resul
         tool_names,
         std::collections::BTreeSet::from([
             "get_categories",
+            "get_category_filters",
+            "get_filter_options",
             "get_listing",
+            "get_listing_attributes",
             "get_listing_bid_summary",
+            "get_listing_related",
             "get_public_seller_profile",
+            "get_public_ratings_summary",
+            "get_seller_listings",
             "search_listings",
         ])
     );
