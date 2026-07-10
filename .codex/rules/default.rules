@@ -1,0 +1,53 @@
+# Commands not listed here follow the active sandbox and approval policy.
+# Registry and remote mutations always need explicit review.
+prefix_rule(
+    pattern = ["cargo", ["login", "logout", "owner", "publish", "yank"]],
+    decision = "prompt",
+    justification = "Registry mutations and credential changes require explicit approval",
+    match = [
+        "cargo login",
+        "cargo owner --add example budna-mcp",
+        "cargo publish -p budna-mcp --locked",
+        "cargo yank --version 0.1.0 budna-mcp",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Pushing changes a remote repository and must be explicitly approved",
+    match = [
+        "git push origin main",
+        "git push --tags",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "tag"],
+    decision = "prompt",
+    justification = "Tags can trigger release automation and require explicit approval",
+    match = [
+        "git tag v0.1.0",
+        "git tag -a v0.1.0 -m release",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", ["release", "repo", "secret", "variable", "workflow"]],
+    decision = "prompt",
+    justification = "GitHub repository, release, workflow, and secret mutations require explicit approval",
+    match = [
+        "gh release create v0.1.0",
+        "gh workflow run release.yml",
+        "gh secret set CARGO_REGISTRY_TOKEN",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", "merge"],
+    decision = "prompt",
+    justification = "Merging changes the protected remote branch and requires explicit approval",
+    match = [
+        "gh pr merge 42 --squash",
+    ],
+)

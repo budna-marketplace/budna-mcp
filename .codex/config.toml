@@ -1,0 +1,33 @@
+approval_policy = "on-request"
+default_permissions = "budna-mcp-workspace"
+
+[permissions.budna-mcp-workspace]
+description = "Work in this checkout without reading outside its workspace."
+extends = ":workspace"
+
+[permissions.budna-mcp-workspace.filesystem]
+":root" = "deny"
+":minimal" = "read"
+"~/.cargo" = "write"
+"~/.cargo/credentials" = "deny"
+"~/.cargo/credentials.toml" = "deny"
+"~/.rustup" = "read"
+
+[permissions.budna-mcp-workspace.filesystem.":workspace_roots"]
+"." = "write"
+".env" = "deny"
+"**/.env" = "deny"
+
+[permissions.budna-mcp-workspace.network]
+enabled = true
+
+[permissions.budna-mcp-workspace.network.domains]
+"127.0.0.1" = "allow"
+"localhost" = "allow"
+"api.budna.se" = "allow"
+"crates.io" = "allow"
+"*.crates.io" = "allow"
+"github.com" = "allow"
+"*.github.com" = "allow"
+"**.githubusercontent.com" = "allow"
+"**.rust-lang.org" = "allow"
