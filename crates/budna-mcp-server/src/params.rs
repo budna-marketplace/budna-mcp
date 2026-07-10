@@ -9,6 +9,8 @@ const MAX_SEARCH_PAGE: u32 = 10_000;
 const MAX_SEARCH_PRICE_MAJOR_UNITS: &str = "1000000000000";
 const MAX_CATEGORY_RESULTS: i32 = 200;
 const MAX_CATEGORY_PAGE: i32 = 10_000;
+const MAX_LISTING_PAGE_RESULTS: u32 = 50;
+const MAX_LISTING_PAGE: u32 = 10_000;
 const MAX_CUSTOM_FILTERS: usize = 20;
 
 #[derive(Debug)]
@@ -259,10 +261,31 @@ pub struct ListingIdParams {
 
 impl ListingIdParams {
     pub fn validate(&self) -> Result<(), InputError> {
-        if self.listing_id < 1 {
-            return Err(InputError::new("listing_id must be at least 1"));
-        }
-        Ok(())
+        validate_positive_i64("listing_id", Some(self.listing_id))
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListingIdPageParams {
+    /// Positive Budna listing ID.
+    #[schemars(range(min = 1))]
+    pub listing_id: i64,
+
+    /// One-indexed result page. Defaults to 1.
+    #[schemars(range(min = 1, max = 10000))]
+    pub page: Option<u32>,
+
+    /// Results per page. Defaults to 10 and is capped at 50 for bounded MCP output.
+    #[schemars(range(min = 1, max = 50))]
+    pub limit: Option<u32>,
+}
+
+impl ListingIdPageParams {
+    pub fn validate(&self) -> Result<(i64, u32, u32), InputError> {
+        validate_positive_i64("listing_id", Some(self.listing_id))?;
+        let (page, limit) = validate_listing_page(self.page, self.limit)?;
+        Ok((self.listing_id, page, limit))
     }
 }
 
@@ -276,10 +299,67 @@ pub struct SellerIdParams {
 
 impl SellerIdParams {
     pub fn validate(&self) -> Result<(), InputError> {
-        if self.seller_id < 1 {
-            return Err(InputError::new("seller_id must be at least 1"));
-        }
-        Ok(())
+        validate_positive_i64("seller_id", Some(self.seller_id))
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SellerListingsParams {
+    /// Positive Budna seller user ID (not the profile ID).
+    #[schemars(range(min = 1))]
+    pub seller_id: i64,
+
+    /// One-indexed result page. Defaults to 1.
+    #[schemars(range(min = 1, max = 10000))]
+    pub page: Option<u32>,
+
+    /// Results per page. Defaults to 10 and is capped at 50 for bounded MCP output.
+    #[schemars(range(min = 1, max = 50))]
+    pub limit: Option<u32>,
+}
+
+impl SellerListingsParams {
+    pub fn validate(&self) -> Result<(i64, u32, u32), InputError> {
+        validate_positive_i64("seller_id", Some(self.seller_id))?;
+        let (page, limit) = validate_listing_page(self.page, self.limit)?;
+        Ok((self.seller_id, page, limit))
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryFiltersParams {
+    /// Positive Budna category ID.
+    #[schemars(range(min = 1))]
+    pub category_id: i32,
+
+    /// Include localized filter labels. Defaults to true.
+    pub translations: Option<bool>,
+}
+
+impl CategoryFiltersParams {
+    pub fn validate(&self) -> Result<(i32, bool), InputError> {
+        validate_positive_i32("category_id", Some(self.category_id))?;
+        Ok((self.category_id, self.translations.unwrap_or(true)))
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilterOptionsParams {
+    /// Positive Budna filter definition ID.
+    #[schemars(range(min = 1))]
+    pub filter_id: i32,
+
+    /// Include localized option labels. Defaults to true.
+    pub translations: Option<bool>,
+}
+
+impl FilterOptionsParams {
+    pub fn validate(&self) -> Result<(i32, bool), InputError> {
+        validate_positive_i32("filter_id", Some(self.filter_id))?;
+        Ok((self.filter_id, self.translations.unwrap_or(true)))
     }
 }
 
@@ -420,6 +500,27 @@ fn validate_positive_i32(field: &str, value: Option<i32>) -> Result<(), InputErr
         return Err(InputError::new(format!("{field} must be at least 1")));
     }
     Ok(())
+}
+
+fn validate_positive_i64(field: &str, value: Option<i64>) -> Result<(), InputError> {
+    if value.is_some_and(|value| value < 1) {
+        return Err(InputError::new(format!("{field} must be at least 1")));
+    }
+    Ok(())
+}
+
+fn validate_listing_page(page: Option<u32>, limit: Option<u32>) -> Result<(u32, u32), InputError> {
+    let page = page.unwrap_or(1);
+    if !(1..=MAX_LISTING_PAGE).contains(&page) {
+        return Err(InputError::new("page must be between 1 and 10000"));
+    }
+
+    let limit = limit.unwrap_or(10);
+    if !(1..=MAX_LISTING_PAGE_RESULTS).contains(&limit) {
+        return Err(InputError::new("limit must be between 1 and 50"));
+    }
+
+    Ok((page, limit))
 }
 
 fn validate_max_chars(field: &str, value: Option<&str>, max: usize) -> Result<(), InputError> {
@@ -617,6 +718,38 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.message(), "page must be between 1 and 10000");
+    }
+
+    #[test]
+    fn listing_pages_and_public_filter_ids_are_bounded() {
+        let related = ListingIdPageParams {
+            listing_id: 7,
+            page: None,
+            limit: None,
+        }
+        .validate()
+        .unwrap_or_else(|error| panic!("defaults should validate: {}", error.message()));
+        assert_eq!(related, (7, 1, 10));
+
+        let invalid_related = ListingIdPageParams {
+            listing_id: 7,
+            page: Some(MAX_LISTING_PAGE + 1),
+            limit: None,
+        };
+        assert!(invalid_related.validate().is_err());
+
+        let invalid_seller = SellerListingsParams {
+            seller_id: 0,
+            page: None,
+            limit: Some(1),
+        };
+        assert!(invalid_seller.validate().is_err());
+
+        let invalid_filter = FilterOptionsParams {
+            filter_id: 0,
+            translations: None,
+        };
+        assert!(invalid_filter.validate().is_err());
     }
 
     #[test]

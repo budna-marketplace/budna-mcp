@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct Money {
@@ -188,6 +188,12 @@ pub struct ListingResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ListingPage {
+    pub items: Vec<ListingResponse>,
+    pub pagination: Pagination,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ListingLocation {
     pub city: String,
     pub region: Option<String>,
@@ -239,6 +245,100 @@ pub struct CategorySummary {
     pub translations: Option<CategoryTranslations>,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct CategoryWithFilters {
+    pub id: i32,
+    pub name: String,
+    pub parent_id: Option<i32>,
+    pub listing_count: i64,
+    pub filters: Option<CategoryFilters>,
+    pub translations: Option<CategoryTranslations>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct CategoryFilters {
+    pub baseline_filters: Vec<FilterWithOptions>,
+    pub category_filters: Vec<FilterWithOptions>,
+    pub inherited_filters: Vec<FilterWithOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct FilterWithOptions {
+    pub definition: FilterDefinition,
+    pub options: Option<Vec<FilterOption>>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct FilterDefinition {
+    pub id: i32,
+    pub name: String,
+    pub label: String,
+    pub filter_type: String,
+    pub is_baseline: bool,
+    pub sortable: bool,
+    pub configuration: FilterConfiguration,
+    pub validation_rules: ValidationRules,
+    pub is_active: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub translations: Option<FilterTranslations>,
+    pub option_count: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct FilterConfiguration {
+    pub placeholder: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_option_number_or_string")]
+    pub min_value: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_option_number_or_string")]
+    pub max_value: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_option_number_or_string")]
+    pub step: Option<String>,
+    pub unit: Option<String>,
+    pub max_stars: Option<i32>,
+    pub multiple: Option<bool>,
+    pub required: Option<bool>,
+    pub searchable: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct ValidationRules {
+    pub min_length: Option<i32>,
+    pub max_length: Option<i32>,
+    pub pattern: Option<String>,
+    pub required: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct FilterTranslations {
+    pub label: Option<TranslationMap>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct FilterOptionTranslations {
+    pub label: Option<TranslationMap>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct FilterOption {
+    pub id: i32,
+    pub filter_id: i32,
+    pub value: String,
+    pub display_value: String,
+    pub display_order: i32,
+    pub is_active: bool,
+    pub created_at: i64,
+    pub is_suggested: bool,
+    pub translations: Option<FilterOptionTranslations>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct FilterOptionList {
+    pub options: Vec<FilterOption>,
+    pub filter_id: i32,
+    pub total: u32,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct CategoryTranslations {
     pub name: TranslationMap,
@@ -285,6 +385,35 @@ pub struct SellerProfileSummary {
     pub unlocked_badges: Option<Vec<PublicBadge>>,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ListingAttributes {
+    pub listing_id: i64,
+    pub attributes: Vec<ListingAttribute>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ListingAttribute {
+    pub id: i64,
+    pub listing_id: i64,
+    pub filter_definition_id: i32,
+    pub filter_name: String,
+    pub label: String,
+    pub value: AttributeValue,
+    pub display_value: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub enum AttributeValue {
+    String(String),
+    Numeric(serde_json::Value),
+    Boolean(bool),
+    Date(i64),
+    Json(serde_json::Value),
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct PublicAuctionHistory {
     pub won_auctions_count: u64,
@@ -316,6 +445,25 @@ pub struct ListingBidSummary {
     pub end_time: i64,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct RatingSummary {
+    pub listing_id: i64,
+    pub total_ratings: i64,
+    pub average_rating: f64,
+    pub rating_distribution: [i64; 5],
+    pub total_comments: i64,
+    pub has_ratings: bool,
+    pub has_comments: bool,
+    pub most_common_rating: Option<i32>,
+    pub positive_percentage: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PublicListingPageWire {
+    pub items: Vec<PublicListingWire>,
+    pub pagination: Pagination,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct PublicListingWire {
     #[serde(flatten)]
@@ -334,4 +482,17 @@ pub(crate) struct ProblemDetails {
     pub title: Option<String>,
     pub detail: Option<String>,
     pub code: Option<String>,
+}
+
+fn deserialize_option_number_or_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(value)) => Ok(Some(value)),
+        Some(serde_json::Value::Number(value)) => Ok(Some(value.to_string())),
+        Some(_) => Err(serde::de::Error::custom("expected string or number")),
+    }
 }
