@@ -1,0 +1,42 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish crates.io workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy,rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --all-targets --all-features --locked
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --all-features --locked
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(cargo metadata --format-version 1 --no-deps | jq --raw-output '.packages[] | select(.name == "budna-mcp") | .version')"
+          if [[ "$RELEASE_TAG" != "v${version}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match workspace version v${version}" >&2
+            exit 1
+          fi
+          for crate in budna-mcp-core budna-mcp-client budna-mcp-server budna-mcp; do
+            bash .github/scripts/publish-crate.sh "$crate" "$version"
+          done

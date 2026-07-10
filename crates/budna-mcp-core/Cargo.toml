@@ -1,0 +1,19 @@
+[package]
+name = "budna-mcp-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Configuration and access policy for the Budna MCP server"
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

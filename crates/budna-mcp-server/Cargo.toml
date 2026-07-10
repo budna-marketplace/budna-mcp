@@ -1,0 +1,29 @@
+[package]
+name = "budna-mcp-server"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Model Context Protocol server for Budna marketplace capability profiles"
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+budna-mcp-client.workspace = true
+budna-mcp-core.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+
+[lints]
+workspace = true

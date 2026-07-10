@@ -1,0 +1,48 @@
+[workspace]
+members = [
+    "crates/budna-mcp",
+    "crates/budna-mcp-client",
+    "crates/budna-mcp-core",
+    "crates/budna-mcp-server",
+]
+resolver = "3"
+
+[workspace.package]
+authors = ["Marcus Cvjeticanin <mjovanc@icloud.com>"]
+version = "0.1.0"
+edition = "2024"
+description = "MCP tools for the Budna marketplace API"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/budna-marketplace/budna-mcp"
+homepage = "https://github.com/budna-marketplace/budna-mcp"
+keywords = ["budna", "mcp", "marketplace", "ai", "agent"]
+categories = ["api-bindings", "command-line-utilities"]
+rust-version = "1.88"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+expect_used = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[workspace.dependencies]
+anyhow = "1"
+budna-mcp-client = { version = "0.1.0", path = "crates/budna-mcp-client" }
+budna-mcp-core = { version = "0.1.0", path = "crates/budna-mcp-core" }
+budna-mcp-server = { version = "0.1.0", path = "crates/budna-mcp-server" }
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
+rmcp = { version = "2.2", features = ["macros", "server", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"
+wiremock = "0.6"

@@ -1,0 +1,8 @@
+/target
+/.env
+/.env.*
+!.env.example
+/.direnv/
+/.envrc
+/.cargo/credentials
+/.cargo/credentials.toml
