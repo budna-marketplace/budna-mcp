@@ -28,7 +28,8 @@ TEXT_RULES = (
     (
         "non-public service hostname",
         re.compile(
-            r"https?://(?!api\.budna\.se(?:/|$))[A-Za-z0-9.-]+\.budna\.se(?:/|$)",
+            r"(?!https://(?:api|images)\.budna\.se(?:/|$))"
+            r"https?://[A-Za-z0-9.-]+\.budna\.se(?::[0-9]+)?(?:/|$)",
             re.IGNORECASE,
         ),
     ),

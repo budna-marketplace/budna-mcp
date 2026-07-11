@@ -1,0 +1,66 @@
+Budna MCP Marketplace Explorer — Third-Party Notices
+====================================================
+
+The Marketplace Explorer source uses the following packages for authoritative
+protocol types, compilation, bundling, formatting, and automated testing. The
+distributed HTML implements the stable MCP Apps postMessage protocol directly;
+the MCP SDK convenience runtime and its schema graph are not embedded.
+
+Runtime protocol definitions
+----------------------------
+
+@modelcontextprotocol/ext-apps 1.7.4 — Apache-2.0 and MIT transition terms;
+documentation contributions excluding specifications are CC-BY-4.0.
+Copyright the respective Model Context Protocol contributors.
+https://github.com/modelcontextprotocol/ext-apps
+
+@modelcontextprotocol/sdk 1.29.0 — MIT License
+Copyright 2024 Anthropic, PBC.
+https://github.com/modelcontextprotocol/typescript-sdk
+
+zod 4.1.13 — MIT License
+Copyright Colin McDonnell.
+https://github.com/colinhacks/zod
+
+Build and test tooling
+----------------------
+
+typescript 5.9.3 — Apache License 2.0
+Copyright Microsoft Corporation.
+https://github.com/microsoft/TypeScript
+
+vite 6.4.3 — MIT License
+Copyright 2019-present, VoidZero Inc. and Vite contributors.
+https://github.com/vitejs/vite
+
+vite-plugin-singlefile 2.3.3 — MIT License
+Copyright 2021-present, Richard S. Tallent, II.
+https://github.com/richardtallent/vite-plugin-singlefile
+
+vitest 4.1.10 — MIT License
+Copyright 2021-present, VoidZero Inc. and Vitest contributors.
+https://github.com/vitest-dev/vitest
+
+jsdom 29.1.1 — MIT License
+Copyright 2010, Elijah Insua, and subsequent contributors.
+https://github.com/jsdom/jsdom
+
+axe-core 4.12.1 — Mozilla Public License 2.0
+Copyright Deque Systems, Inc.
+https://github.com/dequelabs/axe-core
+
+prettier 3.9.5 — MIT License
+Copyright James Long and contributors.
+https://github.com/prettier/prettier
+
+terser 5.49.0 — BSD 2-Clause License
+Copyright Mihai Bazon and contributors.
+https://github.com/terser/terser
+
+@types/node 22.20.1 — MIT License
+Copyright Microsoft Corporation and DefinitelyTyped contributors.
+https://github.com/DefinitelyTyped/DefinitelyTyped
+
+Full license texts and dependency-specific notices are available in the linked
+upstream repositories and in the installed npm packages used to build this
+artifact. Budna's own source remains governed by this repository's license.

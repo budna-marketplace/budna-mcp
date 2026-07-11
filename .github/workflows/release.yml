@@ -26,6 +26,24 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: python3 scripts/check_public_surface.py
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: ui/marketplace-explorer/package-lock.json
+      - run: npm ci
+        working-directory: ui/marketplace-explorer
+      - run: npm audit --audit-level=high
+        working-directory: ui/marketplace-explorer
+      - run: npm run check
+        working-directory: ui/marketplace-explorer
+      - run: npm run build
+        working-directory: ui/marketplace-explorer
+      - name: Check generated asset drift and size
+        run: |
+          git diff --exit-code -- crates/budna-mcp-server/assets
+          test "$(wc -c < crates/budna-mcp-server/assets/marketplace-explorer-v1.html)" -le 307200
+          test -s crates/budna-mcp-server/assets/THIRD_PARTY_NOTICES.txt
       - uses: dtolnay/rust-toolchain@4e529fb27e59237866a6523e61ab248308c068b4 # 1.88.0
         with:
           components: clippy,rustfmt
@@ -33,10 +51,19 @@ jobs:
       - run: cargo check --workspace --all-targets --all-features --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo test --workspace --all-features --locked
+      - run: cargo doc --workspace --all-features --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo install cargo-deny --version 0.19.0 --locked
+      - run: cargo deny check
       - name: Verify package contents
         run: |
           for crate in budna-mcp-core budna-mcp-client budna-mcp-server budna-mcp; do
-            cargo package --package "$crate" --list --locked >/dev/null
+            files="$(cargo package --package "$crate" --list --locked)"
+            if [[ "$crate" == "budna-mcp-server" ]]; then
+              grep --fixed-strings --line-regexp --quiet assets/marketplace-explorer-v1.html <<<"$files"
+              grep --fixed-strings --line-regexp --quiet assets/THIRD_PARTY_NOTICES.txt <<<"$files"
+            fi
           done
       - name: Verify release tag
         id: release

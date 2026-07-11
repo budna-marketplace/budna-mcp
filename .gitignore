@@ -1,4 +1,6 @@
 /target
+/ui/marketplace-explorer/node_modules/
+/ui/marketplace-explorer/dist/
 /.env
 /.env.*
 !.env.example

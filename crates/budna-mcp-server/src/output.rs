@@ -5,6 +5,7 @@ use budna_mcp_client::{
     ListingPage, ListingResponse, ListingSearchResult, Money, Pagination, PriceStats, PublicBadge,
     RatingSummary, SearchFacets, SellerProfileSummary, TranslationMap, ValidationRules,
 };
+use budna_mcp_core::PublicUrlSettings;
 use rmcp::schemars;
 use serde::Serialize;
 
@@ -13,6 +14,7 @@ const MAX_FACET_BUCKETS: usize = 25;
 const MAX_LISTING_ATTRIBUTES: usize = 100;
 const MAX_FILTERS_PER_GROUP: usize = 75;
 const MAX_FILTER_OPTIONS: usize = 100;
+const MAX_DETAIL_IMAGE_URLS: usize = 8;
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct ListingSearchOutput {
@@ -26,11 +28,18 @@ pub struct ListingSearchOutput {
     pub facets: Option<SearchFacetsOutput>,
 }
 
-impl From<ListingSearchResult> for ListingSearchOutput {
-    fn from(result: ListingSearchResult) -> Self {
+impl ListingSearchOutput {
+    pub fn from_with_public_urls(
+        result: ListingSearchResult,
+        public_urls: &PublicUrlSettings,
+    ) -> Self {
         Self {
             content_notice: UNTRUSTED_CONTENT_NOTICE.to_owned(),
-            hits: result.hits.into_iter().map(ListingCard::from).collect(),
+            hits: result
+                .hits
+                .into_iter()
+                .map(|hit| ListingCard::from_with_public_urls(hit, public_urls))
+                .collect(),
             total: result.total,
             page: result.page,
             per_page: result.per_page,
@@ -41,9 +50,16 @@ impl From<ListingSearchResult> for ListingSearchOutput {
     }
 }
 
+impl From<ListingSearchResult> for ListingSearchOutput {
+    fn from(result: ListingSearchResult) -> Self {
+        Self::from_with_public_urls(result, &PublicUrlSettings::default())
+    }
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct ListingCard {
     pub id: i64,
+    pub listing_url: String,
     pub seller_id: i64,
     pub title: Option<String>,
     pub category_id: Option<i32>,
@@ -65,15 +81,27 @@ pub struct ListingCard {
     pub tags: Vec<String>,
     pub image_ids: Vec<String>,
     pub primary_image_id: Option<String>,
+    pub primary_image_url: Option<String>,
     pub ending_soon: bool,
     pub has_bids: bool,
 }
 
-impl From<budna_mcp_client::SearchListingHit> for ListingCard {
-    fn from(hit: budna_mcp_client::SearchListingHit) -> Self {
+impl ListingCard {
+    fn from_with_public_urls(
+        hit: budna_mcp_client::SearchListingHit,
+        public_urls: &PublicUrlSettings,
+    ) -> Self {
         let currency_code = hit.currency.clone();
+        let listing_url = listing_url(public_urls, hit.id);
+        let primary_image_url = derived_primary_image_url(
+            public_urls,
+            hit.id,
+            hit.primary_image_id.as_deref(),
+            &hit.image_ids,
+        );
         Self {
             id: hit.id,
+            listing_url,
             seller_id: hit.seller_id,
             title: hit.title,
             category_id: hit.category_id,
@@ -99,9 +127,16 @@ impl From<budna_mcp_client::SearchListingHit> for ListingCard {
             tags: hit.tags,
             image_ids: hit.image_ids,
             primary_image_id: hit.primary_image_id,
+            primary_image_url,
             ending_soon: hit.ending_soon,
             has_bids: hit.has_bids,
         }
+    }
+}
+
+impl From<budna_mcp_client::SearchListingHit> for ListingCard {
+    fn from(hit: budna_mcp_client::SearchListingHit) -> Self {
+        Self::from_with_public_urls(hit, &PublicUrlSettings::default())
     }
 }
 
@@ -151,6 +186,7 @@ fn cap_facet_buckets(mut buckets: Vec<FacetCount>) -> Vec<FacetCount> {
 pub struct ListingDetailOutput {
     pub content_notice: String,
     pub id: i64,
+    pub listing_url: String,
     pub seller_id: i64,
     pub seller_name: Option<String>,
     pub seller_username: Option<String>,
@@ -176,6 +212,9 @@ pub struct ListingDetailOutput {
     pub featured: bool,
     pub tags: Vec<String>,
     pub image_ids: Vec<String>,
+    pub primary_image_url: Option<String>,
+    #[schemars(length(max = 8))]
+    pub image_urls: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub package_size: Option<String>,
@@ -186,12 +225,19 @@ pub struct ListingDetailOutput {
     pub buyer_protection_config: Option<BuyerProtectionOutput>,
 }
 
-impl From<ListingResponse> for ListingDetailOutput {
-    fn from(listing: ListingResponse) -> Self {
+impl ListingDetailOutput {
+    pub fn from_with_public_urls(
+        listing: ListingResponse,
+        public_urls: &PublicUrlSettings,
+    ) -> Self {
         let currency_code = listing.currency.clone();
+        let listing_url = listing_url(public_urls, listing.id);
+        let image_urls = listing_image_urls(public_urls, listing.id, &listing.image_ids);
+        let primary_image_url = image_urls.first().cloned();
         Self {
             content_notice: UNTRUSTED_CONTENT_NOTICE.to_owned(),
             id: listing.id,
+            listing_url,
             seller_id: listing.seller_id,
             seller_name: listing.seller_name,
             seller_username: listing.seller_username,
@@ -217,6 +263,8 @@ impl From<ListingResponse> for ListingDetailOutput {
             featured: listing.featured,
             tags: listing.tags,
             image_ids: listing.image_ids,
+            primary_image_url,
+            image_urls,
             created_at: listing.created_at,
             updated_at: listing.updated_at,
             package_size: listing.package_size,
@@ -231,6 +279,12 @@ impl From<ListingResponse> for ListingDetailOutput {
     }
 }
 
+impl From<ListingResponse> for ListingDetailOutput {
+    fn from(listing: ListingResponse) -> Self {
+        Self::from_with_public_urls(listing, &PublicUrlSettings::default())
+    }
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct ListingCollectionOutput {
     pub content_notice: String,
@@ -238,23 +292,30 @@ pub struct ListingCollectionOutput {
     pub pagination: Pagination,
 }
 
-impl From<ListingPage> for ListingCollectionOutput {
-    fn from(page: ListingPage) -> Self {
+impl ListingCollectionOutput {
+    pub fn from_with_public_urls(page: ListingPage, public_urls: &PublicUrlSettings) -> Self {
         Self {
             content_notice: UNTRUSTED_CONTENT_NOTICE.to_owned(),
             listings: page
                 .items
                 .into_iter()
-                .map(ListingSummaryOutput::from)
+                .map(|listing| ListingSummaryOutput::from_with_public_urls(listing, public_urls))
                 .collect(),
             pagination: page.pagination,
         }
     }
 }
 
+impl From<ListingPage> for ListingCollectionOutput {
+    fn from(page: ListingPage) -> Self {
+        Self::from_with_public_urls(page, &PublicUrlSettings::default())
+    }
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct ListingSummaryOutput {
     pub id: i64,
+    pub listing_url: String,
     pub seller_id: i64,
     pub seller_name: Option<String>,
     pub seller_username: Option<String>,
@@ -276,16 +337,21 @@ pub struct ListingSummaryOutput {
     pub featured: bool,
     pub tags: Vec<String>,
     pub image_ids: Vec<String>,
+    pub primary_image_url: Option<String>,
     pub location: Option<PublicLocation>,
     pub allow_pickup: bool,
     pub buyer_protection_config: Option<BuyerProtectionOutput>,
 }
 
-impl From<ListingResponse> for ListingSummaryOutput {
-    fn from(listing: ListingResponse) -> Self {
+impl ListingSummaryOutput {
+    fn from_with_public_urls(listing: ListingResponse, public_urls: &PublicUrlSettings) -> Self {
         let currency_code = listing.currency.clone();
+        let listing_url = listing_url(public_urls, listing.id);
+        let primary_image_url =
+            derived_primary_image_url(public_urls, listing.id, None, &listing.image_ids);
         Self {
             id: listing.id,
+            listing_url,
             seller_id: listing.seller_id,
             seller_name: listing.seller_name,
             seller_username: listing.seller_username,
@@ -307,12 +373,19 @@ impl From<ListingResponse> for ListingSummaryOutput {
             featured: listing.featured,
             tags: listing.tags,
             image_ids: listing.image_ids,
+            primary_image_url,
             location: listing.location.map(PublicLocation::from),
             allow_pickup: listing.allow_pickup,
             buyer_protection_config: listing
                 .buyer_protection_config
                 .map(|config| BuyerProtectionOutput::from_config(config, &currency_code)),
         }
+    }
+}
+
+impl From<ListingResponse> for ListingSummaryOutput {
+    fn from(listing: ListingResponse) -> Self {
+        Self::from_with_public_urls(listing, &PublicUrlSettings::default())
     }
 }
 
@@ -825,6 +898,64 @@ fn money(amount: String, currency_code: &str) -> Money {
     }
 }
 
+fn listing_url(public_urls: &PublicUrlSettings, listing_id: i64) -> String {
+    if listing_id > 0 {
+        format!("{}/l/{listing_id}", public_urls.listing_origin())
+    } else {
+        String::new()
+    }
+}
+
+fn listing_image_urls(
+    public_urls: &PublicUrlSettings,
+    listing_id: i64,
+    image_ids: &[String],
+) -> Vec<String> {
+    image_ids
+        .iter()
+        .filter_map(|image_id| image_url(public_urls, listing_id, image_id))
+        .take(MAX_DETAIL_IMAGE_URLS)
+        .collect()
+}
+
+fn derived_primary_image_url(
+    public_urls: &PublicUrlSettings,
+    listing_id: i64,
+    primary_image_id: Option<&str>,
+    image_ids: &[String],
+) -> Option<String> {
+    primary_image_id
+        .and_then(|image_id| image_url(public_urls, listing_id, image_id))
+        .or_else(|| {
+            image_ids
+                .iter()
+                .find_map(|image_id| image_url(public_urls, listing_id, image_id))
+        })
+}
+
+fn image_url(public_urls: &PublicUrlSettings, listing_id: i64, image_id: &str) -> Option<String> {
+    if listing_id <= 0 || !is_canonical_uuid(image_id) {
+        return None;
+    }
+
+    Some(format!(
+        "{}/t/listings/{listing_id}/thumbs/{image_id}_768x768.webp",
+        public_urls.image_origin()
+    ))
+}
+
+fn is_canonical_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit() || matches!(*byte, b'a'..=b'f')
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -1108,9 +1239,11 @@ mod tests {
                 "has_bids",
                 "id",
                 "image_ids",
+                "listing_url",
                 "listing_type",
                 "market",
                 "primary_image_id",
+                "primary_image_url",
                 "seller_id",
                 "shipping_cost",
                 "start_time",
@@ -1123,6 +1256,16 @@ mod tests {
         assert_eq!(
             output.pointer("/hits/0/starting_price"),
             Some(&json!({"amount": "100.00", "currency_code": "NOK"}))
+        );
+        assert_eq!(
+            output.pointer("/hits/0/listing_url"),
+            Some(&json!("https://budna.se/l/7"))
+        );
+        assert_eq!(
+            output.pointer("/hits/0/primary_image_url"),
+            Some(&json!(
+                "https://images.budna.se/t/listings/7/thumbs/123e4567-e89b-12d3-a456-426614174000_768x768.webp"
+            ))
         );
 
         let facet_keys = output
@@ -1258,11 +1401,14 @@ mod tests {
                 "featured",
                 "id",
                 "image_ids",
+                "image_urls",
+                "listing_url",
                 "listing_type",
                 "location",
                 "market",
                 "package_size",
                 "package_weight_grams",
+                "primary_image_url",
                 "quantity",
                 "reserve_price_met",
                 "seller_id",
@@ -1291,6 +1437,20 @@ mod tests {
         assert_eq!(
             output.pointer("/buyer_protection_config/flat_fee"),
             Some(&json!({"amount": "10.00", "currency_code": "NOK"}))
+        );
+        assert_eq!(
+            output.pointer("/listing_url"),
+            Some(&json!("https://budna.se/l/7"))
+        );
+        assert_eq!(
+            output.pointer("/image_urls"),
+            Some(&json!([
+                "https://images.budna.se/t/listings/7/thumbs/123e4567-e89b-12d3-a456-426614174000_768x768.webp"
+            ]))
+        );
+        assert_eq!(
+            output.pointer("/primary_image_url"),
+            output.pointer("/image_urls/0")
         );
         assert!(
             output
@@ -1343,10 +1503,12 @@ mod tests {
                 "featured",
                 "id",
                 "image_ids",
+                "listing_url",
                 "listing_type",
                 "location",
                 "market",
                 "quantity",
+                "primary_image_url",
                 "seller_id",
                 "seller_name",
                 "seller_username",
@@ -1362,6 +1524,119 @@ mod tests {
         assert!(!rendered.contains("\"description\""));
         assert!(!rendered.contains("views_count"));
         assert!(!rendered.contains("server_only_marker"));
+        assert_eq!(
+            output.pointer("/listings/0/listing_url"),
+            Some(&json!("https://budna.se/l/7"))
+        );
+        assert_eq!(
+            output.pointer("/listings/0/primary_image_url"),
+            Some(&json!(
+                "https://images.budna.se/t/listings/7/thumbs/123e4567-e89b-12d3-a456-426614174000_768x768.webp"
+            ))
+        );
+    }
+
+    #[test]
+    fn derived_image_urls_require_canonical_ids_and_positive_listing_ids() {
+        const CANONICAL_ID: &str = "123e4567-e89b-12d3-a456-426614174000";
+        let public_urls = PublicUrlSettings::default();
+
+        assert_eq!(listing_url(&public_urls, 7), "https://budna.se/l/7");
+        assert!(listing_url(&public_urls, 0).is_empty());
+        assert_eq!(
+            image_url(&public_urls, 7, CANONICAL_ID).as_deref(),
+            Some(
+                "https://images.budna.se/t/listings/7/thumbs/123e4567-e89b-12d3-a456-426614174000_768x768.webp"
+            )
+        );
+
+        for invalid in [
+            "123E4567-E89B-12D3-A456-426614174000",
+            "123e4567e89b12d3a456426614174000",
+            "123e4567-e89b-12d3-a456-426614174000/suffix",
+            "123e4567-e89b-12d3-a456-42661417400g",
+            "",
+        ] {
+            assert_eq!(
+                image_url(&public_urls, 7, invalid),
+                None,
+                "rejected image ID: {invalid}"
+            );
+        }
+        assert_eq!(image_url(&public_urls, 0, CANONICAL_ID), None);
+        assert_eq!(image_url(&public_urls, -7, CANONICAL_ID), None);
+
+        let image_ids = vec!["not-a-uuid".to_owned(), CANONICAL_ID.to_owned()];
+        assert_eq!(
+            derived_primary_image_url(&public_urls, 7, Some("invalid-primary"), &image_ids)
+                .as_deref(),
+            image_url(&public_urls, 7, CANONICAL_ID).as_deref()
+        );
+        assert_eq!(
+            derived_primary_image_url(&public_urls, 7, None, &image_ids).as_deref(),
+            image_url(&public_urls, 7, CANONICAL_ID).as_deref()
+        );
+    }
+
+    #[test]
+    fn configured_public_urls_apply_to_listing_and_image_projections() {
+        let public_urls = PublicUrlSettings::new(
+            Some("https://listings.example.test".to_owned()),
+            Some("https://images.example.test".to_owned()),
+        )
+        .unwrap_or_else(|error| panic!("configured public URLs should validate: {error}"));
+        let detail =
+            ListingDetailOutput::from_with_public_urls(listing_response_fixture(7), &public_urls);
+        let collection = ListingCollectionOutput::from_with_public_urls(
+            ListingPage {
+                items: vec![listing_response_fixture(7)],
+                pagination: Pagination {
+                    page: 1,
+                    limit: 10,
+                    total: 1,
+                    total_pages: 1,
+                },
+            },
+            &public_urls,
+        );
+
+        assert_eq!(detail.listing_url, "https://listings.example.test/l/7");
+        assert_eq!(
+            detail.primary_image_url.as_deref(),
+            Some(
+                "https://images.example.test/t/listings/7/thumbs/123e4567-e89b-12d3-a456-426614174000_768x768.webp"
+            )
+        );
+        assert_eq!(
+            collection.listings[0].listing_url,
+            "https://listings.example.test/l/7"
+        );
+    }
+
+    #[test]
+    fn listing_detail_caps_derived_images_without_changing_raw_ids() {
+        let mut listing = listing_response_fixture(7);
+        listing.image_ids = std::iter::once("not-a-uuid".to_owned())
+            .chain((0..10).map(|index| format!("00000000-0000-4000-8000-{index:012x}")))
+            .collect();
+        let raw_count = listing.image_ids.len();
+
+        let output = ListingDetailOutput::from(listing);
+
+        assert_eq!(output.image_ids.len(), raw_count);
+        assert_eq!(output.image_urls.len(), MAX_DETAIL_IMAGE_URLS);
+        assert_eq!(
+            output.primary_image_url.as_deref(),
+            Some(
+                "https://images.budna.se/t/listings/7/thumbs/00000000-0000-4000-8000-000000000000_768x768.webp"
+            )
+        );
+        assert!(
+            output
+                .image_urls
+                .iter()
+                .all(|url| !url.contains("not-a-uuid"))
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod cli;
+mod http_transport;
 
 use anyhow::{Context, Result};
 use budna_mcp_client::{ClientConfig, PublicApiClient};
@@ -23,7 +24,8 @@ async fn main() -> Result<()> {
     let client_config =
         ClientConfig::new(&settings.api_url)?.with_request_timeout(settings.request_timeout)?;
     let client = PublicApiClient::new(client_config)?;
-    let server = BudnaMcpServer::new(client, ToolPolicy::public_explore());
+    let server = BudnaMcpServer::new(client, ToolPolicy::public_explore())
+        .with_public_urls(settings.public_urls.clone());
 
     match settings.transport {
         Transport::Stdio => {
@@ -43,6 +45,9 @@ async fn main() -> Result<()> {
                 .await
                 .context("Budna MCP service task failed")?;
             signal_task.abort();
+        }
+        Transport::StreamableHttp => {
+            http_transport::serve(server, settings.http_server).await?;
         }
     }
 

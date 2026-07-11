@@ -5,11 +5,35 @@
 
 Explore public Budna marketplace listings from any compatible MCP client.
 
+MCP Apps-capable clients can render searches and listing details as an
+interactive Marketplace Explorer with image-and-price cards, bounded
+pagination, related and seller discovery, and an explicit AI comparison flow.
+Other clients receive the same structured JSON and text fallback.
+
 No Budna account or API key is needed. The current release can search listings,
 show listing details and attributes, browse categories and filters, discover
 related listings and seller listing pages, read public seller profiles, and
 show privacy-safe bid and rating summaries. It cannot sign in, place bids, buy,
 message, or change marketplace data.
+
+## Configure an environment
+
+Configure the API, public listing, and image origins together when running
+against a non-production Budna environment. `BUDNA_API_URL` controls server
+requests; `BUDNA_PUBLIC_LISTING_ORIGIN` controls every returned listing link;
+and `BUDNA_IMAGE_ORIGIN` controls every returned image URL and the MCP App's
+image content-security policy.
+
+```bash
+export BUDNA_API_URL=https://api.your-environment.example/api/v1
+export BUDNA_PUBLIC_LISTING_ORIGIN=https://marketplace.your-environment.example
+export BUDNA_IMAGE_ORIGIN=https://images.your-environment.example
+budna-mcp
+```
+
+The listing and image values must be HTTPS origins only: no credentials, path,
+query, fragment, or wildcard host. Equivalent command-line flags are
+`--api-url`, `--public-listing-origin`, and `--image-origin`.
 
 ## Install Budna MCP
 
@@ -107,6 +131,40 @@ command: /absolute/path/to/budna-mcp
 arguments: none
 ```
 
+## Interactive Marketplace Explorer
+
+The Marketplace Explorer is embedded in the `budna-mcp` binary. There is no
+separate web application to install and no Node.js runtime is needed when using
+the published crate.
+
+In a client with [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)
+support, listing searches appear as responsive cards. You can inspect details,
+refresh public availability, load more results, browse related or same-seller
+listings, select two to four listings for an AI-assisted comparison, and ask
+the host to open the public listing on Budna.
+
+MCP Apps is an optional extension and support varies by client. See the
+official [extension support matrix](https://modelcontextprotocol.io/extensions/client-matrix).
+The normal tool result remains available whenever a client cannot render the
+interactive view.
+
+For UI architecture, security, privacy, local testing, and development
+instructions, see the
+[Marketplace Explorer guide](https://github.com/budna-marketplace/budna-mcp/blob/main/docs/mcp-apps.md).
+
+### Local Streamable HTTP for development
+
+The default transport is still `stdio`. An opt-in loopback HTTP mode is
+available for the official MCP Apps test host and other development clients:
+
+```bash
+budna-mcp --transport streamable-http --http-port 3001
+```
+
+This serves MCP at `http://127.0.0.1:3001/mcp` and always binds to loopback.
+It is not a production hosting mode. Temporary tunnels require an explicit
+`--http-allowed-host` value and should be stopped immediately after testing.
+
 ## Try it
 
 Ask your MCP client:
@@ -155,6 +213,9 @@ as instructions.
 Run the tests and public-surface guard before submitting a change:
 
 ```bash
+node --version
+npm --prefix ui/marketplace-explorer ci
+npm --prefix ui/marketplace-explorer run check
 cargo test --workspace --all-features --locked
 cargo test -p budna-mcp --test stdio_protocol --locked
 python3 scripts/check_public_surface.py
