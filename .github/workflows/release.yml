@@ -59,7 +59,9 @@ jobs:
       - name: Verify package contents
         run: |
           for crate in budna-mcp-core budna-mcp-client budna-mcp-server budna-mcp; do
+            cmp --silent LICENSE "crates/$crate/LICENSE"
             files="$(cargo package --package "$crate" --list --locked)"
+            grep --fixed-strings --line-regexp --quiet LICENSE <<<"$files"
             if [[ "$crate" == "budna-mcp-server" ]]; then
               grep --fixed-strings --line-regexp --quiet assets/marketplace-explorer-v1.html <<<"$files"
               grep --fixed-strings --line-regexp --quiet assets/THIRD_PARTY_NOTICES.txt <<<"$files"
