@@ -23,6 +23,12 @@ The view can:
 The explorer cannot sign in, bid, make an offer, buy, message, or change any
 Budna resource.
 
+Cards and in-conversation detail views require the MCP Apps extension. “View
+on Budna” also requires the host's link-opening capability, and comparison
+requires both model-context and message capabilities. When any of those
+capabilities is unavailable, the normal MCP text and structured JSON results
+remain available without loss of marketplace data.
+
 ## Compatibility
 
 MCP Apps is optional and host support varies. Consult the official
@@ -64,9 +70,12 @@ BUDNA_IMAGE_ORIGIN=https://images.your-environment.example
 CSP. The embedded App never receives the API origin and makes no direct API
 request.
 
-The public listing and image settings must be canonical HTTPS origins: no
-credentials, path, query, fragment, or wildcard host. The same settings are
+Remote API URLs must use HTTPS; HTTP is accepted only for loopback development
+servers. The public listing and image settings must be canonical HTTPS origins:
+no credentials, path, query, fragment, or wildcard host. The same settings are
 available as `--api-url`, `--public-listing-origin`, and `--image-origin`.
+The binary does not load `.env` files itself; the root `.env.example` is
+reference material for launchers that can provide environment variables.
 
 ## Local Streamable HTTP use
 
@@ -96,23 +105,38 @@ budna-mcp \
 The corresponding environment variables are:
 
 ```text
+BUDNA_MCP_TRANSPORT=streamable-http
 BUDNA_MCP_HTTP_PORT
 BUDNA_MCP_HTTP_ALLOWED_HOSTS
 BUDNA_MCP_HTTP_ALLOWED_ORIGINS
 ```
 
-Host and Origin lists are comma-delimited. Wildcard origins and public bind
-addresses are not supported.
+Host and Origin lists are comma-delimited. Wildcard Host and Origin values and
+public bind addresses are not supported.
 
 ## Test with the official basic host
 
 Follow the official
 [MCP Apps build guide](https://modelcontextprotocol.io/extensions/apps/build)
-to install the `modelcontextprotocol/ext-apps` basic host, then start it with
-the Budna endpoint:
+to install the `modelcontextprotocol/ext-apps` basic host:
+
+```bash
+git clone https://github.com/modelcontextprotocol/ext-apps.git
+cd ext-apps/examples/basic-host
+npm install
+```
+
+Start Budna MCP in a separate terminal, then start the basic host with the
+Budna endpoint:
 
 ```bash
 SERVERS='["http://127.0.0.1:3001/mcp"]' npm start
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SERVERS='["http://127.0.0.1:3001/mcp"]'; npm start
 ```
 
 The basic host normally runs at `http://localhost:8080`. Search for listings,
