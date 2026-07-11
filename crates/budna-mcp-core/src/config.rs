@@ -31,9 +31,9 @@ impl fmt::Display for Transport {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HttpServerSettings {
-    pub port: u16,
-    pub allowed_hosts: Vec<String>,
-    pub allowed_origins: Vec<String>,
+    port: u16,
+    allowed_hosts: Vec<String>,
+    allowed_origins: Vec<String>,
 }
 
 impl HttpServerSettings {
@@ -54,6 +54,18 @@ impl HttpServerSettings {
             allowed_hosts,
             allowed_origins,
         })
+    }
+
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn allowed_hosts(&self) -> &[String] {
+        &self.allowed_hosts
+    }
+
+    pub fn allowed_origins(&self) -> &[String] {
+        &self.allowed_origins
     }
 }
 
@@ -359,31 +371,24 @@ mod tests {
             ],
         );
 
+        let http_server =
+            http_server.unwrap_or_else(|error| panic!("HTTP settings should validate: {error}"));
+        assert_eq!(http_server.port(), 4100);
+        assert_eq!(http_server.allowed_hosts(), ["localhost:4100", "127.0.0.1"]);
         assert_eq!(
-            http_server,
-            Ok(HttpServerSettings {
-                port: 4100,
-                allowed_hosts: vec!["localhost:4100".to_owned(), "127.0.0.1".to_owned()],
-                allowed_origins: vec![
-                    "http://localhost:8080".to_owned(),
-                    "https://app.example.test".to_owned(),
-                ],
-            })
+            http_server.allowed_origins(),
+            ["http://localhost:8080", "https://app.example.test"]
         );
     }
 
     #[test]
     fn empty_http_lists_restore_secure_defaults() {
-        let http_server = HttpServerSettings::new(4100, Vec::new(), Vec::new());
+        let http_server = HttpServerSettings::new(4100, Vec::new(), Vec::new())
+            .unwrap_or_else(|error| panic!("empty HTTP allowlists should use defaults: {error}"));
 
-        assert_eq!(
-            http_server,
-            Ok(HttpServerSettings {
-                port: 4100,
-                allowed_hosts: DEFAULT_HTTP_ALLOWED_HOSTS.map(str::to_owned).to_vec(),
-                allowed_origins: DEFAULT_HTTP_ALLOWED_ORIGINS.map(str::to_owned).to_vec(),
-            })
-        );
+        assert_eq!(http_server.port(), 4100);
+        assert_eq!(http_server.allowed_hosts(), DEFAULT_HTTP_ALLOWED_HOSTS);
+        assert_eq!(http_server.allowed_origins(), DEFAULT_HTTP_ALLOWED_ORIGINS);
     }
 
     #[test]

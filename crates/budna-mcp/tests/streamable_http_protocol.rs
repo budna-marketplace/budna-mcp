@@ -16,6 +16,10 @@ use wiremock::{
 
 const PROTOCOL_TIMEOUT: Duration = Duration::from_secs(10);
 const ALLOWED_ORIGIN: &str = "http://127.0.0.1:8080";
+const EXACT_CONFIGURED_ORIGIN: &str = "https://app.example.test";
+const DIFFERENT_PORT_ORIGIN: &str = "https://app.example.test:4444";
+const DISALLOWED_ORIGIN: &str = "https://attacker.example/?origin_secret_sentinel";
+const DISALLOWED_HOST: &str = "host-secret-sentinel.invalid";
 const APP_EXTENSION_ID: &str = "io.modelcontextprotocol/ui";
 const APP_RESOURCE_URI: &str = "ui://budna/marketplace-explorer-v1.html";
 const INITIALIZE_BODY: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"budna-http-test","version":"1.0"}}}"#;
@@ -98,7 +102,7 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
         .env("BUDNA_MCP_HTTP_ALLOWED_HOSTS", "localhost,127.0.0.1")
         .env(
             "BUDNA_MCP_HTTP_ALLOWED_ORIGINS",
-            "http://localhost:8080,http://127.0.0.1:8080",
+            "http://localhost:8080,http://127.0.0.1:8080,https://app.example.test",
         )
         .env("RUST_LOG", "warn")
         .stdout(Stdio::null())
@@ -118,6 +122,8 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
 
     assert_allowed_cors_preflight(&raw_client, &endpoint).await?;
     assert_mcp_response_headers_are_exposed(&raw_client, &endpoint).await?;
+    assert_exact_configured_origin_is_accepted(&raw_client, &endpoint).await?;
+    assert_same_host_different_port_origin_is_rejected(&raw_client, &endpoint).await?;
     assert_disallowed_host_is_rejected(&raw_client, &endpoint).await?;
     assert_disallowed_origin_is_rejected(&raw_client, &endpoint).await?;
     assert_oversized_body_is_rejected(&raw_client, &endpoint).await?;
@@ -233,6 +239,10 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
         !logs.contains("\"jsonrpc\""),
         "protocol messages must not be written to stderr"
     );
+    assert!(
+        !logs.contains("origin_secret_sentinel") && !logs.contains("host-secret-sentinel"),
+        "rejected request headers must not be written to stderr"
+    );
 
     Ok(())
 }
@@ -342,13 +352,66 @@ async fn assert_mcp_response_headers_are_exposed(
     Ok(())
 }
 
+async fn assert_exact_configured_origin_is_accepted(
+    client: &reqwest::Client,
+    endpoint: &str,
+) -> Result<()> {
+    let response = client
+        .post(endpoint)
+        .header(header::ORIGIN, EXACT_CONFIGURED_ORIGIN)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .body(INITIALIZE_BODY)
+        .send()
+        .await
+        .context("failed to send request with an exact configured Origin")?;
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some(EXACT_CONFIGURED_ORIGIN)
+    );
+    Ok(())
+}
+
+async fn assert_same_host_different_port_origin_is_rejected(
+    client: &reqwest::Client,
+    endpoint: &str,
+) -> Result<()> {
+    let preflight = client
+        .request(reqwest::Method::OPTIONS, endpoint)
+        .header(header::ORIGIN, DIFFERENT_PORT_ORIGIN)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+        .send()
+        .await
+        .context("failed to send different-port CORS preflight")?;
+    assert_eq!(preflight.status(), StatusCode::FORBIDDEN);
+
+    let response = client
+        .post(endpoint)
+        .header(header::ORIGIN, DIFFERENT_PORT_ORIGIN)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .body(INITIALIZE_BODY)
+        .send()
+        .await
+        .context("failed to send different-port Origin request")?;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(response.headers().get("mcp-session-id").is_none());
+    Ok(())
+}
+
 async fn assert_disallowed_host_is_rejected(
     client: &reqwest::Client,
     endpoint: &str,
 ) -> Result<()> {
     let response = client
         .post(endpoint)
-        .header(header::HOST, "attacker.example")
+        .header(header::HOST, DISALLOWED_HOST)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCEPT, "application/json, text/event-stream")
         .body(INITIALIZE_BODY)
@@ -366,7 +429,7 @@ async fn assert_disallowed_origin_is_rejected(
 ) -> Result<()> {
     let response = client
         .post(endpoint)
-        .header(header::ORIGIN, "https://attacker.example")
+        .header(header::ORIGIN, DISALLOWED_ORIGIN)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCEPT, "application/json, text/event-stream")
         .body(INITIALIZE_BODY)
