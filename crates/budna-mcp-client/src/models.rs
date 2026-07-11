@@ -479,8 +479,6 @@ pub(crate) struct ApiEnvelope<T> {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ProblemDetails {
-    pub title: Option<String>,
-    pub detail: Option<String>,
     pub code: Option<String>,
 }
 

@@ -172,14 +172,14 @@ mod tests {
             .unwrap_or_else(|error| panic!("HTTP settings should validate: {error}"));
 
         assert_eq!(settings.transport, Transport::StreamableHttp);
-        assert_eq!(settings.http_server.port, 4100);
+        assert_eq!(settings.http_server.port(), 4100);
         assert_eq!(
-            settings.http_server.allowed_hosts,
-            vec!["localhost:4100", "127.0.0.1"]
+            settings.http_server.allowed_hosts(),
+            ["localhost:4100", "127.0.0.1"]
         );
         assert_eq!(
-            settings.http_server.allowed_origins,
-            vec!["http://localhost:8080", "https://app.example.test"]
+            settings.http_server.allowed_origins(),
+            ["http://localhost:8080", "https://app.example.test"]
         );
     }
 
