@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use budna_mcp_core::{
     ConfigError, DEFAULT_HTTP_PORT, DEFAULT_REQUEST_TIMEOUT_SECS, HttpServerSettings,
-    PublicUrlSettings, Settings, Transport,
+    MAX_REQUEST_TIMEOUT_SECS, PublicUrlSettings, Settings, Transport,
 };
 use clap::{Parser, ValueEnum};
 
@@ -107,20 +107,18 @@ fn parse_request_timeout_secs(value: &str) -> Result<u64, String> {
     let seconds = value
         .parse::<u64>()
         .map_err(|_| "request timeout must be an integer number of seconds".to_owned())?;
-    if !(1..=300).contains(&seconds) {
-        return Err("request timeout must be between 1 and 300 seconds".to_owned());
+    if !(1..=MAX_REQUEST_TIMEOUT_SECS).contains(&seconds) {
+        return Err(format!(
+            "request timeout must be between 1 and {MAX_REQUEST_TIMEOUT_SECS} seconds"
+        ));
     }
     Ok(seconds)
 }
 
 fn parse_http_port(value: &str) -> Result<u16, String> {
-    let port = value
+    value
         .parse::<u16>()
-        .map_err(|_| "HTTP port must be an integer between 1 and 65535".to_owned())?;
-    if port == 0 {
-        return Err("HTTP port must be between 1 and 65535".to_owned());
-    }
-    Ok(port)
+        .map_err(|_| "HTTP port must be an integer between 0 and 65535".to_owned())
 }
 
 #[cfg(test)]
@@ -136,10 +134,10 @@ mod tests {
             panic!("default settings should validate: {error}");
         });
 
-        assert_eq!(settings.api_url, budna_mcp_core::DEFAULT_API_URL);
-        assert_eq!(settings.request_timeout, Duration::from_secs(30));
-        assert_eq!(settings.http_server, HttpServerSettings::default());
-        assert_eq!(settings.public_urls, PublicUrlSettings::default());
+        assert_eq!(settings.api_url(), budna_mcp_core::DEFAULT_API_URL);
+        assert_eq!(settings.request_timeout(), Duration::from_secs(30));
+        assert_eq!(settings.http_server(), &HttpServerSettings::default());
+        assert_eq!(settings.public_urls(), &PublicUrlSettings::default());
     }
 
     #[test]
@@ -171,23 +169,27 @@ mod tests {
             .into_settings()
             .unwrap_or_else(|error| panic!("HTTP settings should validate: {error}"));
 
-        assert_eq!(settings.transport, Transport::StreamableHttp);
-        assert_eq!(settings.http_server.port(), 4100);
+        assert_eq!(settings.transport(), Transport::StreamableHttp);
+        assert_eq!(settings.http_server().port(), 4100);
         assert_eq!(
-            settings.http_server.allowed_hosts(),
+            settings.http_server().allowed_hosts(),
             ["localhost:4100", "127.0.0.1"]
         );
         assert_eq!(
-            settings.http_server.allowed_origins(),
+            settings.http_server().allowed_origins(),
             ["http://localhost:8080", "https://app.example.test"]
         );
     }
 
     #[test]
-    fn invalid_http_port_is_rejected_by_clap() {
-        let result = Cli::try_parse_from(["budna-mcp", "--http-port", "0"]);
+    fn zero_http_port_requests_an_ephemeral_loopback_port() {
+        let cli = Cli::try_parse_from(["budna-mcp", "--http-port", "0"])
+            .unwrap_or_else(|error| panic!("ephemeral HTTP port should parse: {error}"));
+        let settings = cli
+            .into_settings()
+            .unwrap_or_else(|error| panic!("ephemeral HTTP settings should validate: {error}"));
 
-        assert!(result.is_err());
+        assert_eq!(settings.http_server().port(), 0);
     }
 
     #[test]
@@ -206,13 +208,13 @@ mod tests {
             .into_settings()
             .unwrap_or_else(|error| panic!("public URL settings should validate: {error}"));
 
-        assert_eq!(settings.api_url, "https://api.example.test/api/v1");
+        assert_eq!(settings.api_url(), "https://api.example.test/api/v1");
         assert_eq!(
-            settings.public_urls.listing_origin(),
+            settings.public_urls().listing_origin(),
             "https://listings.example.test"
         );
         assert_eq!(
-            settings.public_urls.image_origin(),
+            settings.public_urls().image_origin(),
             "https://images.example.test"
         );
     }

@@ -4,6 +4,7 @@ use reqwest::Url;
 use thiserror::Error;
 
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub const MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
@@ -27,6 +28,11 @@ impl ClientConfig {
     ) -> Result<Self, ClientConfigError> {
         if request_timeout.is_zero() {
             return Err(ClientConfigError::ZeroRequestTimeout);
+        }
+        if request_timeout > MAX_REQUEST_TIMEOUT {
+            return Err(ClientConfigError::RequestTimeoutTooLarge {
+                max_seconds: MAX_REQUEST_TIMEOUT.as_secs(),
+            });
         }
 
         self.request_timeout = request_timeout;
@@ -93,6 +99,7 @@ fn is_loopback_host(url: &Url) -> bool {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ClientConfigError {
     #[error("Budna API base URL cannot be empty")]
     EmptyBaseUrl,
@@ -117,6 +124,9 @@ pub enum ClientConfigError {
 
     #[error("Budna API request timeout must be greater than zero")]
     ZeroRequestTimeout,
+
+    #[error("Budna API request timeout must not exceed {max_seconds} seconds")]
+    RequestTimeoutTooLarge { max_seconds: u64 },
 }
 
 #[cfg(test)]
@@ -201,5 +211,20 @@ mod tests {
             config.with_request_timeout(Duration::ZERO),
             Err(ClientConfigError::ZeroRequestTimeout)
         ));
+    }
+
+    #[test]
+    fn excessive_timeout_is_rejected() {
+        let config = ClientConfig::new("https://api.example.test").unwrap_or_else(|error| {
+            panic!("base URL should parse: {error}");
+        });
+
+        assert!(matches!(
+            config
+                .clone()
+                .with_request_timeout(MAX_REQUEST_TIMEOUT + Duration::from_secs(1)),
+            Err(ClientConfigError::RequestTimeoutTooLarge { max_seconds: 300 })
+        ));
+        assert!(config.with_request_timeout(MAX_REQUEST_TIMEOUT).is_ok());
     }
 }

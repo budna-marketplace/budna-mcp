@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    io::{self, Write},
+    marker::PhantomData,
+};
 
 use budna_mcp_client::{CategoryListRequest, SearchListingsRequest};
 use rmcp::schemars;
@@ -12,10 +17,73 @@ const MAX_CATEGORY_PAGE: i32 = 10_000;
 const MAX_LISTING_PAGE_RESULTS: u32 = 50;
 const MAX_LISTING_PAGE: u32 = 10_000;
 const MAX_CUSTOM_FILTERS: usize = 20;
+const MAX_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
+
+struct BoundedSizeSink {
+    remaining: usize,
+}
+
+impl Write for BoundedSizeSink {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.remaining {
+            return Err(io::Error::other("serialized argument limit exceeded"));
+        }
+        self.remaining -= bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn tool_arguments_oversized(raw: &serde_json::Value) -> bool {
+    let mut sink = BoundedSizeSink {
+        remaining: MAX_TOOL_ARGUMENT_BYTES,
+    };
+    serde_json::to_writer(&mut sink, raw).is_err()
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct CustomFiltersParam(BTreeMap<String, String>);
+
+impl From<BTreeMap<String, String>> for CustomFiltersParam {
+    fn from(filters: BTreeMap<String, String>) -> Self {
+        Self(filters)
+    }
+}
+
+impl schemars::JsonSchema for CustomFiltersParam {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("BudnaCustomFilters")
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": {
+                "type": "string",
+                "pattern": "^attr_[A-Za-z0-9_-]{1,96}$"
+            },
+            "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+            }
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct SafeToolParams<T> {
     raw: serde_json::Value,
+    oversized: bool,
     marker: PhantomData<fn() -> T>,
 }
 
@@ -24,6 +92,9 @@ where
     T: DeserializeOwned,
 {
     pub fn parse(self) -> Result<T, InputError> {
+        if self.oversized {
+            return Err(InputError::new("arguments exceed the 65536-byte limit"));
+        }
         serde_json::from_value(self.raw)
             .map_err(|_| InputError::new("arguments must match the tool's advertised input schema"))
     }
@@ -34,8 +105,12 @@ impl<'de, T> Deserialize<'de> for SafeToolParams<T> {
     where
         D: Deserializer<'de>,
     {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        let oversized = tool_arguments_oversized(&raw);
+
         Ok(Self {
-            raw: serde_json::Value::deserialize(deserializer)?,
+            raw,
+            oversized,
             marker: PhantomData,
         })
     }
@@ -70,10 +145,12 @@ pub struct SearchListingsParams {
 
     /// Minimum price in whole major currency units. A zero-only fractional suffix is normalized.
     #[schemars(length(min = 1, max = 32))]
+    #[schemars(regex(pattern = r"^[0-9]+(?:\.0+)?$"))]
     pub min_price: Option<String>,
 
     /// Maximum price in whole major currency units. A zero-only fractional suffix is normalized.
     #[schemars(length(min = 1, max = 32))]
+    #[schemars(regex(pattern = r"^[0-9]+(?:\.0+)?$"))]
     pub max_price: Option<String>,
 
     pub condition: Option<ListingConditionParam>,
@@ -85,6 +162,9 @@ pub struct SearchListingsParams {
 
     /// Sort field: relevance, price, created_at, end_time, popularity, or attr_<filter_name>.
     #[schemars(length(min = 1, max = 50))]
+    #[schemars(regex(
+        pattern = r"^(?:relevance|price|created_at|end_time|popularity|attr_[A-Za-z0-9_-]{1,45})$"
+    ))]
     pub sort_by: Option<String>,
 
     pub sort_order: Option<SortOrderParam>,
@@ -114,7 +194,7 @@ pub struct SearchListingsParams {
     pub allow_pickup: Option<bool>,
 
     /// Up to 20 category-specific filters. Keys must use the attr_<filter_name> form.
-    pub custom_filters: Option<BTreeMap<String, String>>,
+    pub custom_filters: Option<CustomFiltersParam>,
 }
 
 impl SearchListingsParams {
@@ -165,7 +245,7 @@ impl SearchListingsParams {
         validate_filter_literal("location_region", location_region.as_deref())?;
         validate_filter_literal("location_municipality", location_municipality.as_deref())?;
 
-        let custom_filters = normalize_custom_filters(self.custom_filters.unwrap_or_default())?;
+        let custom_filters = normalize_custom_filters(self.custom_filters.unwrap_or_default().0)?;
 
         Ok(SearchListingsRequest {
             query,
@@ -700,7 +780,9 @@ mod tests {
         assert!(invalid_category.into_request().is_err());
 
         let invalid_filter = SearchListingsParams {
-            custom_filters: Some(BTreeMap::from([("category_id".to_owned(), "1".to_owned())])),
+            custom_filters: Some(
+                BTreeMap::from([("category_id".to_owned(), "1".to_owned())]).into(),
+            ),
             ..SearchListingsParams::default()
         };
         assert!(invalid_filter.into_request().is_err());
@@ -789,12 +871,55 @@ mod tests {
         assert!(reversed.into_request().is_err());
 
         let injected = SearchListingsParams {
-            custom_filters: Some(BTreeMap::from([(
-                "attr_color".to_owned(),
-                "red || unexpected:=true".to_owned(),
-            )])),
+            custom_filters: Some(
+                BTreeMap::from([(
+                    "attr_color".to_owned(),
+                    "red || unexpected:=true".to_owned(),
+                )])
+                .into(),
+            ),
             ..SearchListingsParams::default()
         };
         assert!(injected.into_request().is_err());
+    }
+
+    #[test]
+    fn search_schema_advertises_dynamic_filter_and_sort_constraints() {
+        let schema = serde_json::to_value(schemars::schema_for!(SearchListingsParams))
+            .unwrap_or_else(|error| panic!("schema should serialize: {error}"));
+
+        assert_eq!(
+            schema.pointer("/properties/custom_filters/maxProperties"),
+            Some(&serde_json::json!(20))
+        );
+        assert_eq!(
+            schema.pointer("/properties/custom_filters/propertyNames/pattern"),
+            Some(&serde_json::json!("^attr_[A-Za-z0-9_-]{1,96}$"))
+        );
+        assert_eq!(
+            schema.pointer("/properties/custom_filters/additionalProperties/maxLength"),
+            Some(&serde_json::json!(200))
+        );
+        assert!(
+            schema
+                .pointer("/properties/sort_by/pattern")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|pattern| pattern.contains("attr_"))
+        );
+    }
+
+    #[test]
+    fn safe_tool_params_bound_stdio_argument_size_before_typed_parsing() {
+        let oversized = serde_json::json!({
+            "query": "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1)
+        });
+
+        let params = serde_json::from_value::<SafeToolParams<SearchListingsParams>>(oversized)
+            .unwrap_or_else(|error| panic!("raw tool arguments should deserialize: {error}"));
+
+        let Err(error) = params.parse() else {
+            panic!("oversized tool arguments should be rejected");
+        };
+        assert_eq!(error.message(), "arguments exceed the 65536-byte limit");
     }
 }

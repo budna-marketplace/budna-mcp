@@ -1,15 +1,14 @@
 use std::collections::BTreeMap;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Money {
     pub amount: String,
     pub currency_code: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SearchListingsRequest {
     #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
@@ -84,7 +83,7 @@ impl Default for SearchListingsRequest {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingSearchResult {
     pub hits: Vec<SearchListingHit>,
     pub total: u64,
@@ -95,7 +94,7 @@ pub struct ListingSearchResult {
     pub facets: Option<SearchFacets>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct SearchListingHit {
     pub id: i64,
     pub seller_id: i64,
@@ -123,7 +122,7 @@ pub struct SearchListingHit {
     pub has_bids: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct SearchFacets {
     pub categories: Vec<FacetCount>,
     pub conditions: Vec<FacetCount>,
@@ -136,20 +135,20 @@ pub struct SearchFacets {
     pub price_stats: Option<PriceStats>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct PriceStats {
     pub min: String,
     pub max: String,
     pub avg: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct FacetCount {
     pub value: String,
     pub count: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingResponse {
     pub id: i64,
     pub seller_id: i64,
@@ -187,20 +186,20 @@ pub struct ListingResponse {
     pub buyer_protection_config: Option<BuyerProtectionConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingPage {
     pub items: Vec<ListingResponse>,
     pub pagination: Pagination,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingLocation {
     pub city: String,
     pub region: Option<String>,
     pub country: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct BuyerProtectionConfig {
     pub rate_percent: String,
     pub flat_fee: String,
@@ -209,7 +208,7 @@ pub struct BuyerProtectionConfig {
     pub enabled: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CategoryListRequest {
     pub page: i32,
     pub limit: i32,
@@ -230,13 +229,13 @@ impl Default for CategoryListRequest {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CategoryPage {
     pub items: Vec<CategorySummary>,
     pub pagination: Pagination,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CategorySummary {
     pub id: i32,
     pub name: String,
@@ -245,7 +244,7 @@ pub struct CategorySummary {
     pub translations: Option<CategoryTranslations>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CategoryWithFilters {
     pub id: i32,
     pub name: String,
@@ -255,20 +254,20 @@ pub struct CategoryWithFilters {
     pub translations: Option<CategoryTranslations>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CategoryFilters {
     pub baseline_filters: Vec<FilterWithOptions>,
     pub category_filters: Vec<FilterWithOptions>,
     pub inherited_filters: Vec<FilterWithOptions>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FilterWithOptions {
     pub definition: FilterDefinition,
     pub options: Option<Vec<FilterOption>>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FilterDefinition {
     pub id: i32,
     pub name: String,
@@ -285,7 +284,7 @@ pub struct FilterDefinition {
     pub option_count: Option<i32>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct FilterConfiguration {
     pub placeholder: Option<String>,
     #[serde(default, deserialize_with = "deserialize_option_number_or_string")]
@@ -301,7 +300,7 @@ pub struct FilterConfiguration {
     pub searchable: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct ValidationRules {
     pub min_length: Option<i32>,
     pub max_length: Option<i32>,
@@ -309,17 +308,17 @@ pub struct ValidationRules {
     pub required: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct FilterTranslations {
     pub label: Option<TranslationMap>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct FilterOptionTranslations {
     pub label: Option<TranslationMap>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FilterOption {
     pub id: i32,
     pub filter_id: i32,
@@ -332,26 +331,26 @@ pub struct FilterOption {
     pub translations: Option<FilterOptionTranslations>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FilterOptionList {
     pub options: Vec<FilterOption>,
     pub filter_id: i32,
     pub total: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct CategoryTranslations {
     pub name: TranslationMap,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct TranslationMap {
     pub en: String,
     pub sv: String,
     pub no: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Pagination {
     pub page: i64,
     pub limit: i64,
@@ -359,7 +358,7 @@ pub struct Pagination {
     pub total_pages: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct SellerProfileSummary {
     pub id: i64,
     pub user_id: i64,
@@ -385,13 +384,13 @@ pub struct SellerProfileSummary {
     pub unlocked_badges: Option<Vec<PublicBadge>>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingAttributes {
     pub listing_id: i64,
     pub attributes: Vec<ListingAttribute>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ListingAttribute {
     pub id: i64,
     pub listing_id: i64,
@@ -404,7 +403,8 @@ pub struct ListingAttribute {
     pub updated_at: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[non_exhaustive]
 #[serde(tag = "type", content = "value")]
 pub enum AttributeValue {
     String(String),
@@ -414,18 +414,18 @@ pub enum AttributeValue {
     Json(serde_json::Value),
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct PublicAuctionHistory {
     pub won_auctions_count: u64,
     pub sold_items_count: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct PublicVerificationStatus {
     pub id_verified: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct PublicBadge {
     pub slug: String,
     pub name: String,
@@ -435,7 +435,7 @@ pub struct PublicBadge {
     pub unlocked_at: Option<i64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct ListingBidSummary {
     pub listing_id: i64,
     pub bid_count: Option<i64>,
@@ -445,7 +445,7 @@ pub struct ListingBidSummary {
     pub end_time: i64,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct RatingSummary {
     pub listing_id: i64,
     pub total_ratings: i64,

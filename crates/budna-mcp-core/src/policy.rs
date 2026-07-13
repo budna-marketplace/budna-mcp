@@ -1,24 +1,30 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ToolCapability {
     PublicExplore,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolPolicy {
-    public_explore: bool,
+/// The concrete capability profile exposed by a server instance.
+///
+/// Additional profiles must use their own router and authorization boundary;
+/// they must not disable individual tools behind an already-advertised static
+/// router.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ToolPolicy {
+    PublicExplore,
 }
 
 impl ToolPolicy {
     pub const fn public_explore() -> Self {
-        Self {
-            public_explore: true,
-        }
+        Self::PublicExplore
     }
 
     pub const fn allows(&self, capability: ToolCapability) -> bool {
-        match capability {
-            ToolCapability::PublicExplore => self.public_explore,
-        }
+        matches!(
+            (self, capability),
+            (Self::PublicExplore, ToolCapability::PublicExplore)
+        )
     }
 }
 
