@@ -872,7 +872,7 @@ async fn packaged_binary_serves_the_public_explore_profile_over_stdio() -> Resul
         (
             "get_category_filters",
             json!({"category_id": 12, "translations": false}),
-            "/category/id",
+            "/category_id",
             json!(12),
         ),
         (
@@ -884,7 +884,7 @@ async fn packaged_binary_serves_the_public_explore_profile_over_stdio() -> Resul
         (
             "get_public_seller_profile",
             json!({"seller_id": 42}),
-            "/user_id",
+            "/seller_id",
             json!(42),
         ),
         (

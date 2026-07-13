@@ -917,7 +917,9 @@ mod tests {
         let params = serde_json::from_value::<SafeToolParams<SearchListingsParams>>(oversized)
             .unwrap_or_else(|error| panic!("raw tool arguments should deserialize: {error}"));
 
-        let error = params.parse().unwrap_err();
+        let Err(error) = params.parse() else {
+            panic!("oversized tool arguments should be rejected");
+        };
         assert_eq!(error.message(), "arguments exceed the 65536-byte limit");
     }
 }

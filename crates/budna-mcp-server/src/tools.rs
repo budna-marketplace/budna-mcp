@@ -809,10 +809,9 @@ mod tests {
             );
         }
 
-        let result = server
-            .acquire_request_slot("search_listings")
-            .await
-            .unwrap_err();
+        let Err(result) = server.acquire_request_slot("search_listings").await else {
+            panic!("request admission should time out while all slots are held");
+        };
         let payload = error_payload(&result);
 
         assert_eq!(payload.pointer("/error/code"), Some(&json!("SERVER_BUSY")));
@@ -825,13 +824,15 @@ mod tests {
         let mut server = server();
         server.operation_timeout = Duration::from_millis(5);
 
-        let result = server
+        let Err(result) = server
             .execute_client(
                 "search_listings",
                 future::pending::<Result<(), ClientError>>(),
             )
             .await
-            .unwrap_err();
+        else {
+            panic!("pending client work should hit the operation timeout");
+        };
         let payload = error_payload(&result);
 
         assert_eq!(
