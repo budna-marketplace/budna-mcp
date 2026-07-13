@@ -79,11 +79,19 @@ pub async fn serve(server: BudnaMcpServer, settings: HttpServerSettings) -> Resu
         .local_addr()
         .context("failed to read Budna MCP HTTP listener address")?;
 
-    tracing::info!(
-        bind_address = %local_address,
-        path = MCP_PATH,
-        "Budna MCP Streamable HTTP server started"
-    );
+    if settings.port() == 0 {
+        tracing::warn!(
+            bind_address = %local_address,
+            path = MCP_PATH,
+            "Budna MCP assigned an ephemeral Streamable HTTP port"
+        );
+    } else {
+        tracing::info!(
+            bind_address = %local_address,
+            path = MCP_PATH,
+            "Budna MCP Streamable HTTP server started"
+        );
+    }
 
     let signal_cancellation = cancellation.clone();
     let signal_task = tokio::spawn(async move {

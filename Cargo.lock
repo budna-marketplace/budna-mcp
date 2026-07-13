@@ -224,7 +224,6 @@ version = "0.2.0"
 dependencies = [
  "httpdate",
  "reqwest",
- "schemars",
  "serde",
  "serde_json",
  "thiserror",

@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, net::Ipv4Addr, process::Stdio, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::{Ipv4Addr, SocketAddr},
+    process::Stdio,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use http::{StatusCode, header};
@@ -8,7 +13,7 @@ use rmcp::{
     transport::StreamableHttpClientTransport,
 };
 use serde_json::json;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -22,7 +27,46 @@ const DISALLOWED_ORIGIN: &str = "https://attacker.example/?origin_secret_sentine
 const DISALLOWED_HOST: &str = "host-secret-sentinel.invalid";
 const APP_EXTENSION_ID: &str = "io.modelcontextprotocol/ui";
 const APP_RESOURCE_URI: &str = "ui://budna/marketplace-explorer-v1.html";
+const PRIVATE_SENTINEL: &str = "private-http-contract-sentinel";
 const INITIALIZE_BODY: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"budna-http-test","version":"1.0"}}}"#;
+
+fn assert_success_contract(
+    tool_name: &str,
+    result: &rmcp::model::CallToolResult,
+    output_schema: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    assert_eq!(result.is_error, Some(false), "{tool_name} should succeed");
+    let structured = result
+        .structured_content
+        .as_ref()
+        .with_context(|| format!("{tool_name} should return structured content"))?;
+    let text = result
+        .content
+        .first()
+        .and_then(rmcp::model::ContentBlock::as_text)
+        .with_context(|| format!("{tool_name} should return a text fallback"))?;
+    let text_json: serde_json::Value = serde_json::from_str(&text.text)
+        .with_context(|| format!("{tool_name} text fallback should be JSON"))?;
+    assert_eq!(
+        &text_json, structured,
+        "{tool_name} text and structured representations must agree"
+    );
+
+    let output = structured
+        .as_object()
+        .with_context(|| format!("{tool_name} output should be an object"))?;
+    let properties = output_schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .with_context(|| format!("{tool_name} output schema should declare properties"))?;
+    assert_eq!(
+        output.keys().collect::<BTreeSet<_>>(),
+        properties.keys().collect::<BTreeSet<_>>(),
+        "{tool_name} should return its complete advertised root shape"
+    );
+    assert!(!structured.to_string().contains(PRIVATE_SENTINEL));
+    Ok(structured.clone())
+}
 
 #[tokio::test]
 async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> Result<()> {
@@ -39,9 +83,11 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
                     "created_at": 1_700_000_000_000_i64,
                     "listing_count": 4,
                     "filters": null,
-                    "translations": {"name": {"en": "Cameras", "sv": "Kameror", "no": "Kameraer"}}
+                    "translations": {"name": {"en": "Cameras", "sv": "Kameror", "no": "Kameraer"}},
+                    "server_only_marker": PRIVATE_SENTINEL
                 }],
-                "pagination": {"page": 1, "limit": 100, "total": 1, "total_pages": 1}
+                "pagination": {"page": 1, "limit": 100, "total": 1, "total_pages": 1},
+                "server_only_marker": PRIVATE_SENTINEL
             }
         })))
         .mount(&api)
@@ -75,20 +121,21 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
                     "image_ids": ["123e4567-e89b-12d3-a456-426614174000"],
                     "primary_image_id": "123e4567-e89b-12d3-a456-426614174000",
                     "ending_soon": false,
-                    "has_bids": true
+                    "has_bids": true,
+                    "server_only_marker": PRIVATE_SENTINEL
                 }],
                 "total": 1,
                 "page": 1,
                 "per_page": 10,
                 "total_pages": 1,
                 "search_time_ms": 3,
-                "facets": null
+                "facets": null,
+                "server_only_marker": PRIVATE_SENTINEL
             }
         })))
         .mount(&api)
         .await;
 
-    let port = available_loopback_port().await?;
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_budna-mcp"));
     child
         .arg("--api-url")
@@ -98,23 +145,27 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
         .arg("--transport")
         .arg("streamable-http")
         .arg("--http-port")
-        .arg(port.to_string())
+        .arg("0")
         .env("BUDNA_MCP_HTTP_ALLOWED_HOSTS", "localhost,127.0.0.1")
         .env(
             "BUDNA_MCP_HTTP_ALLOWED_ORIGINS",
             "http://localhost:8080,http://127.0.0.1:8080,https://app.example.test",
         )
-        .env("RUST_LOG", "warn")
+        .env("BUDNA_MCP_LOG", "trace")
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     let mut child = child
         .spawn()
         .context("failed to start the packaged budna-mcp HTTP binary")?;
-    let mut stderr = child
+    let stderr = child
         .stderr
         .take()
         .context("child stderr should be captured")?;
+    let mut stderr = BufReader::new(stderr);
+    let mut logs = String::new();
+    let address = read_http_listen_address(&mut stderr, &mut logs).await?;
+    let port = address.port();
 
     wait_for_loopback_server(&mut child, port).await?;
     let endpoint = format!("http://127.0.0.1:{port}/mcp");
@@ -182,8 +233,58 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
         .iter()
         .map(|tool| tool.name.as_ref())
         .collect::<BTreeSet<_>>();
-    assert!(tool_names.contains("get_categories"));
-    assert!(tool_names.contains("search_listings"));
+    assert_eq!(
+        tool_names,
+        BTreeSet::from([
+            "get_categories",
+            "get_category_filters",
+            "get_filter_options",
+            "get_listing",
+            "get_listing_attributes",
+            "get_listing_bid_summary",
+            "get_listing_related",
+            "get_public_seller_profile",
+            "get_public_ratings_summary",
+            "get_seller_listings",
+            "search_listings",
+        ])
+    );
+    let mut output_schemas = BTreeMap::new();
+    for tool in &tools {
+        assert_eq!(
+            tool.input_schema.get("type"),
+            Some(&json!("object")),
+            "{} input schema should describe an object",
+            tool.name
+        );
+        assert_eq!(
+            tool.input_schema.get("additionalProperties"),
+            Some(&json!(false)),
+            "{} input schema should reject unknown fields",
+            tool.name
+        );
+        let output_schema = tool
+            .output_schema
+            .as_ref()
+            .with_context(|| format!("{} should advertise an output schema", tool.name))?;
+        let output_schema = serde_json::Value::Object((**output_schema).clone());
+        assert_eq!(output_schema.get("type"), Some(&json!("object")));
+        assert!(
+            output_schema
+                .get("properties")
+                .is_some_and(serde_json::Value::is_object)
+        );
+        output_schemas.insert(tool.name.to_string(), output_schema);
+
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .with_context(|| format!("{} should advertise annotations", tool.name))?;
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(true));
+    }
 
     let categories = tokio::time::timeout(
         PROTOCOL_TIMEOUT,
@@ -191,12 +292,15 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
     )
     .await
     .context("Streamable HTTP tools/call timed out")??;
-    assert_eq!(categories.is_error, Some(false));
+    let categories = assert_success_contract(
+        "get_categories",
+        &categories,
+        output_schemas
+            .get("get_categories")
+            .context("category output schema should be retained")?,
+    )?;
     assert_eq!(
-        categories
-            .structured_content
-            .as_ref()
-            .and_then(|value| value.pointer("/categories/0/name")),
+        categories.pointer("/categories/0/name"),
         Some(&json!("Cameras"))
     );
 
@@ -208,20 +312,15 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
     )
     .await
     .context("Streamable HTTP App-linked tools/call timed out")??;
-    assert_eq!(search.is_error, Some(false));
-    assert!(
-        search
-            .content
-            .first()
-            .and_then(rmcp::model::ContentBlock::as_text)
-            .is_some_and(|content| !content.text.is_empty()),
-        "non-App clients need text fallback for App-linked tools"
-    );
+    let search = assert_success_contract(
+        "search_listings",
+        &search,
+        output_schemas
+            .get("search_listings")
+            .context("search output schema should be retained")?,
+    )?;
     assert_eq!(
-        search
-            .structured_content
-            .as_ref()
-            .and_then(|value| value.pointer("/hits/0/listing_url")),
+        search.pointer("/hits/0/listing_url"),
         Some(&json!("https://budna.se/l/7"))
     );
 
@@ -231,7 +330,6 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
 
     shut_down_child(&mut child).await?;
 
-    let mut logs = String::new();
     tokio::time::timeout(PROTOCOL_TIMEOUT, stderr.read_to_string(&mut logs))
         .await
         .context("reading HTTP child stderr timed out")??;
@@ -243,20 +341,43 @@ async fn packaged_binary_serves_stateful_loopback_streamable_http_securely() -> 
         !logs.contains("origin_secret_sentinel") && !logs.contains("host-secret-sentinel"),
         "rejected request headers must not be written to stderr"
     );
+    assert!(
+        !logs.contains(PRIVATE_SENTINEL),
+        "ignored upstream response fields must not be written to stderr"
+    );
 
     Ok(())
 }
 
-async fn available_loopback_port() -> Result<u16> {
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .context("failed to reserve a loopback test port")?;
-    let port = listener
-        .local_addr()
-        .context("failed to read the reserved loopback test port")?
-        .port();
-    drop(listener);
-    Ok(port)
+async fn read_http_listen_address(
+    stderr: &mut BufReader<tokio::process::ChildStderr>,
+    logs: &mut String,
+) -> Result<SocketAddr> {
+    tokio::time::timeout(PROTOCOL_TIMEOUT, async {
+        loop {
+            let mut line = String::new();
+            let bytes_read = stderr
+                .read_line(&mut line)
+                .await
+                .context("failed to read HTTP server startup log")?;
+            if bytes_read == 0 {
+                bail!("HTTP server exited before reporting its loopback address");
+            }
+
+            logs.push_str(&line);
+            if let Some(address) = line
+                .split_whitespace()
+                .find_map(|field| field.strip_prefix("bind_address="))
+            {
+                return address
+                    .trim_matches('"')
+                    .parse()
+                    .context("HTTP server reported an invalid loopback address");
+            }
+        }
+    })
+    .await
+    .context("HTTP server did not report its loopback address in time")?
 }
 
 async fn wait_for_loopback_server(child: &mut tokio::process::Child, port: u16) -> Result<()> {

@@ -8,13 +8,18 @@ pub const DEFAULT_API_URL: &str = "https://api.budna.se/api/v1";
 pub const DEFAULT_IMAGE_ORIGIN: &str = "https://images.budna.se";
 pub const DEFAULT_LISTING_ORIGIN: &str = "https://budna.se";
 pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+pub const MAX_REQUEST_TIMEOUT_SECS: u64 = 300;
 pub const DEFAULT_HTTP_PORT: u16 = 3001;
 pub const DEFAULT_HTTP_ALLOWED_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 pub const DEFAULT_HTTP_ALLOWED_ORIGINS: [&str; 2] =
     ["http://localhost:8080", "http://127.0.0.1:8080"];
-const MAX_PUBLIC_ORIGIN_LENGTH: usize = 2_048;
+const MAX_PUBLIC_ORIGIN_LENGTH: usize = 512;
+const MAX_HTTP_ALLOWLIST_ENTRIES: usize = 32;
+const MAX_HTTP_HOST_LENGTH: usize = 255;
+const MAX_HTTP_ORIGIN_LENGTH: usize = 2_048;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Transport {
     Stdio,
     StreamableHttp,
@@ -42,10 +47,6 @@ impl HttpServerSettings {
         allowed_hosts: Vec<String>,
         allowed_origins: Vec<String>,
     ) -> Result<Self, ConfigError> {
-        if port == 0 {
-            return Err(ConfigError::ZeroHttpPort);
-        }
-
         let allowed_hosts = normalize_allowed_hosts(allowed_hosts)?;
         let allowed_origins = normalize_allowed_origins(allowed_origins)?;
 
@@ -129,11 +130,11 @@ impl Default for PublicUrlSettings {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Settings {
-    pub api_url: String,
-    pub transport: Transport,
-    pub request_timeout: Duration,
-    pub http_server: HttpServerSettings,
-    pub public_urls: PublicUrlSettings,
+    api_url: String,
+    transport: Transport,
+    request_timeout: Duration,
+    http_server: HttpServerSettings,
+    public_urls: PublicUrlSettings,
 }
 
 impl Settings {
@@ -144,6 +145,9 @@ impl Settings {
     ) -> Result<Self, ConfigError> {
         if request_timeout.is_zero() {
             return Err(ConfigError::ZeroRequestTimeout);
+        }
+        if request_timeout > Duration::from_secs(MAX_REQUEST_TIMEOUT_SECS) {
+            return Err(ConfigError::RequestTimeoutTooLarge);
         }
 
         let api_url = api_url.unwrap_or_else(|| DEFAULT_API_URL.to_owned());
@@ -166,6 +170,26 @@ impl Settings {
     pub fn with_public_urls(mut self, public_urls: PublicUrlSettings) -> Self {
         self.public_urls = public_urls;
         self
+    }
+
+    pub fn api_url(&self) -> &str {
+        &self.api_url
+    }
+
+    pub const fn transport(&self) -> Transport {
+        self.transport
+    }
+
+    pub const fn request_timeout(&self) -> Duration {
+        self.request_timeout
+    }
+
+    pub const fn http_server(&self) -> &HttpServerSettings {
+        &self.http_server
+    }
+
+    pub const fn public_urls(&self) -> &PublicUrlSettings {
+        &self.public_urls
     }
 }
 
@@ -198,17 +222,27 @@ fn normalize_public_origin(value: String, kind: &'static str) -> Result<String, 
         return Err(ConfigError::InvalidPublicOrigin { kind });
     }
 
-    Ok(url.origin().ascii_serialization())
+    let normalized = url.origin().ascii_serialization();
+    if normalized.len() > MAX_PUBLIC_ORIGIN_LENGTH {
+        return Err(ConfigError::InvalidPublicOrigin { kind });
+    }
+    Ok(normalized)
 }
 
 fn normalize_allowed_hosts(values: Vec<String>) -> Result<Vec<String>, ConfigError> {
     if values.is_empty() {
         return Ok(DEFAULT_HTTP_ALLOWED_HOSTS.map(str::to_owned).to_vec());
     }
+    if values.len() > MAX_HTTP_ALLOWLIST_ENTRIES {
+        return Err(ConfigError::InvalidHttpAllowedHost);
+    }
 
     let mut normalized = Vec::with_capacity(values.len());
     for value in values {
         let trimmed = value.trim();
+        if trimmed.len() > MAX_HTTP_HOST_LENGTH {
+            return Err(ConfigError::InvalidHttpAllowedHost);
+        }
         let authority =
             Authority::try_from(trimmed).map_err(|_| ConfigError::InvalidHttpAllowedHost)?;
 
@@ -232,10 +266,16 @@ fn normalize_allowed_origins(values: Vec<String>) -> Result<Vec<String>, ConfigE
     if values.is_empty() {
         return Ok(DEFAULT_HTTP_ALLOWED_ORIGINS.map(str::to_owned).to_vec());
     }
+    if values.len() > MAX_HTTP_ALLOWLIST_ENTRIES {
+        return Err(ConfigError::InvalidHttpAllowedOrigin);
+    }
 
     let mut normalized = Vec::with_capacity(values.len());
     for value in values {
         let trimmed = value.trim();
+        if trimmed.len() > MAX_HTTP_ORIGIN_LENGTH {
+            return Err(ConfigError::InvalidHttpAllowedOrigin);
+        }
         let url = Url::parse(trimmed).map_err(|_| ConfigError::InvalidHttpAllowedOrigin)?;
 
         if !matches!(url.scheme(), "http" | "https")
@@ -260,6 +300,7 @@ fn normalize_allowed_origins(values: Vec<String>) -> Result<Vec<String>, ConfigE
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("Budna API base URL cannot be empty")]
     EmptyApiUrl,
@@ -267,8 +308,8 @@ pub enum ConfigError {
     #[error("Budna API request timeout must be greater than zero")]
     ZeroRequestTimeout,
 
-    #[error("Budna MCP HTTP port must be greater than zero")]
-    ZeroHttpPort,
+    #[error("Budna API request timeout must not exceed 300 seconds")]
+    RequestTimeoutTooLarge,
 
     #[error("Budna MCP HTTP allowed host is invalid")]
     InvalidHttpAllowedHost,
@@ -394,8 +435,8 @@ mod tests {
     #[test]
     fn invalid_http_settings_are_rejected() {
         assert_eq!(
-            HttpServerSettings::new(0, Vec::new(), Vec::new()),
-            Err(ConfigError::ZeroHttpPort)
+            HttpServerSettings::new(0, Vec::new(), Vec::new()).map(|settings| settings.port()),
+            Ok(0)
         );
         assert_eq!(
             HttpServerSettings::new(3001, vec!["https://localhost".to_owned()], Vec::new()),
@@ -417,6 +458,22 @@ mod tests {
             HttpServerSettings::new(3001, Vec::new(), vec!["https://*.example.test".to_owned()]),
             Err(ConfigError::InvalidHttpAllowedOrigin)
         );
+        assert_eq!(
+            HttpServerSettings::new(
+                3001,
+                vec!["localhost".to_owned(); MAX_HTTP_ALLOWLIST_ENTRIES + 1],
+                Vec::new()
+            ),
+            Err(ConfigError::InvalidHttpAllowedHost)
+        );
+        assert_eq!(
+            HttpServerSettings::new(
+                3001,
+                Vec::new(),
+                vec!["https://example.test".to_owned(); MAX_HTTP_ALLOWLIST_ENTRIES + 1]
+            ),
+            Err(ConfigError::InvalidHttpAllowedOrigin)
+        );
     }
 
     #[test]
@@ -436,6 +493,18 @@ mod tests {
                 "public origins must be canonical HTTPS origins"
             );
         }
+
+        assert!(
+            PublicUrlSettings::new(
+                Some(format!(
+                    "https://{}.example.test",
+                    "a".repeat(MAX_PUBLIC_ORIGIN_LENGTH)
+                )),
+                None,
+            )
+            .is_err(),
+            "derived public URLs require a bounded origin"
+        );
     }
 
     #[test]
@@ -468,5 +537,16 @@ mod tests {
         let result = Settings::new(None, Transport::Stdio, Duration::ZERO);
 
         assert_eq!(result, Err(ConfigError::ZeroRequestTimeout));
+    }
+
+    #[test]
+    fn excessive_timeout_is_rejected_outside_the_cli_too() {
+        let result = Settings::new(
+            None,
+            Transport::Stdio,
+            Duration::from_secs(MAX_REQUEST_TIMEOUT_SECS + 1),
+        );
+
+        assert_eq!(result, Err(ConfigError::RequestTimeoutTooLarge));
     }
 }
