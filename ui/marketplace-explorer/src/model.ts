@@ -26,6 +26,42 @@ export interface BuyerProtection {
   cap?: Money;
 }
 
+export interface ListingAttribute {
+  label: string;
+  displayValue: string;
+}
+
+export interface ListingAttributes {
+  attributes: ListingAttribute[];
+  truncated: boolean;
+}
+
+export interface ListingBidSummary {
+  bidCount?: number;
+  currentBid?: Money;
+  reservePriceMet: boolean;
+}
+
+export interface ListingRatingSummary {
+  averageRating: number;
+  positivePercentage: number;
+  totalRatings: number;
+}
+
+export interface SellerProfile {
+  bio?: string;
+  categories: string[];
+  city?: string;
+  country?: string;
+  displayName: string;
+  identityVerified: boolean;
+  isCompany: boolean;
+  rating: string;
+  soldItemsCount: number;
+  totalRatings: number;
+  username?: string;
+}
+
 export interface Listing {
   id: number;
   sellerId: number;
@@ -317,6 +353,125 @@ export function comparisonPayload(
   };
 }
 
+export function normalizeListingAttributes(
+  value: unknown,
+  listingId: number,
+): ListingAttributes | undefined {
+  const root = asObject(value);
+  if (!root || positiveInteger(root.listing_id) !== listingId) return undefined;
+  if (!Array.isArray(root.attributes)) return undefined;
+
+  const attributes: ListingAttribute[] = [];
+  for (const value of root.attributes.slice(0, 100)) {
+    const attribute = asObject(value);
+    if (positiveInteger(attribute?.listing_id) !== listingId) continue;
+    const label = boundedString(attribute?.label, 256);
+    const displayValue = boundedString(attribute?.display_value, 512);
+    if (!label || !displayValue) continue;
+    attributes.push({ displayValue, label });
+  }
+  if (root.attributes.length > 0 && attributes.length === 0) return undefined;
+  return { attributes, truncated: root.truncated === true };
+}
+
+export function normalizeListingBidSummary(
+  value: unknown,
+  listingId: number,
+): ListingBidSummary | undefined {
+  const root = asObject(value);
+  if (
+    !root ||
+    positiveInteger(root.listing_id) !== listingId ||
+    typeof root.reserve_price_met !== "boolean"
+  ) {
+    return undefined;
+  }
+  const bidCount = nonNegativeInteger(root.bid_count);
+  if (
+    root.bid_count !== null &&
+    root.bid_count !== undefined &&
+    bidCount === undefined
+  )
+    return undefined;
+  const currentBid = normalizeMoney(root.current_bid);
+  if (
+    root.current_bid !== null &&
+    root.current_bid !== undefined &&
+    currentBid === undefined
+  )
+    return undefined;
+  return {
+    bidCount,
+    currentBid,
+    reservePriceMet: root.reserve_price_met,
+  };
+}
+
+export function normalizeListingRatingSummary(
+  value: unknown,
+  listingId: number,
+): ListingRatingSummary | undefined {
+  const root = asObject(value);
+  if (!root || positiveInteger(root.listing_id) !== listingId) return undefined;
+  const averageRating = finiteNumberInRange(root.average_rating, 0, 5);
+  const positivePercentage = finiteNumberInRange(
+    root.positive_percentage,
+    0,
+    100,
+  );
+  const totalRatings = nonNegativeInteger(root.total_ratings);
+  if (
+    averageRating === undefined ||
+    positivePercentage === undefined ||
+    totalRatings === undefined
+  ) {
+    return undefined;
+  }
+  return { averageRating, positivePercentage, totalRatings };
+}
+
+export function normalizeSellerProfile(
+  value: unknown,
+  sellerId: number,
+): SellerProfile | undefined {
+  const root = asObject(value);
+  if (!root || positiveInteger(root.seller_id) !== sellerId) return undefined;
+  const displayName = boundedString(root.display_name, 256);
+  const rating = boundedString(root.rating, 128);
+  const totalRatings = nonNegativeInteger(root.total_ratings);
+  const soldItemsCount = nonNegativeInteger(root.sold_items_count);
+  if (
+    !displayName ||
+    !rating ||
+    totalRatings === undefined ||
+    soldItemsCount === undefined ||
+    typeof root.identity_verified !== "boolean" ||
+    typeof root.is_company !== "boolean"
+  ) {
+    return undefined;
+  }
+
+  const categories = Array.isArray(root.categories)
+    ? root.categories
+        .map((category) => boundedString(category, 512))
+        .filter((category): category is string => category !== undefined)
+        .slice(0, 50)
+    : [];
+  return {
+    bio: boundedString(root.bio, 4_096),
+    categories,
+    city: boundedString(root.city, 256),
+    country: boundedString(root.country, 128),
+    displayName,
+    identityVerified: root.identity_verified,
+    isCompany: root.is_company,
+    rating,
+    soldItemsCount,
+    totalRatings,
+    username: boundedString(root.username, 256),
+  };
+}
+
 function normalizeMoney(value: unknown): Money | undefined {
   const root = asObject(value);
   const amount = boundedString(root?.amount, 64);
@@ -429,6 +584,19 @@ function positiveInteger(value: unknown): number | undefined {
 
 function nonNegativeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function finiteNumberInRange(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= minimum &&
+    value <= maximum
     ? value
     : undefined;
 }

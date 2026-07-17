@@ -9,7 +9,7 @@ import type {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarketplaceExplorer, type HostBridge } from "@budna-ui/explorer";
-import { detailResult, listing, searchResult } from "./fixtures";
+import { detailResult, listing, result, searchResult } from "./fixtures";
 
 class FakeBridge implements HostBridge {
   calls: Array<{ arguments_: Record<string, unknown>; name: string }> = [];
@@ -19,6 +19,7 @@ class FakeBridge implements HostBridge {
   failContext = false;
   failMessage = false;
   nextResult: CallToolResult = detailResult();
+  toolResults = new Map<string, CallToolResult>();
   openResult: { isError?: boolean } = {};
   hostCapabilities: McpUiHostCapabilities = {
     message: { text: {} },
@@ -41,7 +42,7 @@ class FakeBridge implements HostBridge {
     arguments_: Record<string, unknown>,
   ): Promise<CallToolResult> {
     this.calls.push({ arguments_, name });
-    return this.nextResult;
+    return this.toolResults.get(name) ?? this.nextResult;
   }
 
   capabilities(): McpUiHostCapabilities {
@@ -114,6 +115,128 @@ describe("MarketplaceExplorer", () => {
       expect(root.textContent).toContain("A carefully used camera."),
     );
     expect(bridge.calls[0]?.arguments_).toEqual({ listing_id: 1 });
+  });
+
+  it("loads bounded listing research only after the user requests it", async () => {
+    const bridge = new FakeBridge();
+    bridge.toolResults.set(
+      "get_listing_attributes",
+      result({
+        attributes: [
+          {
+            display_value: "Black",
+            label: "Colour",
+            listing_id: 1,
+          },
+        ],
+        listing_id: 1,
+        truncated: false,
+      }),
+    );
+    bridge.toolResults.set(
+      "get_listing_bid_summary",
+      result({
+        bid_count: 4,
+        current_bid: { amount: "1400.00", currency_code: "NOK" },
+        listing_id: 1,
+        reserve_price_met: true,
+      }),
+    );
+    bridge.toolResults.set(
+      "get_public_ratings_summary",
+      result({
+        average_rating: 4.5,
+        listing_id: 1,
+        positive_percentage: 92.5,
+        total_ratings: 12,
+      }),
+    );
+    bridge.toolResults.set(
+      "get_public_seller_profile",
+      result({
+        bio: '<img data-hostile-profile="true" src=x> Camera enthusiast',
+        categories: ["Cameras", '<b data-hostile-category="true">Optics</b>'],
+        display_name: "Synthetic Seller",
+        identity_verified: true,
+        is_company: false,
+        rating: "4.9",
+        seller_id: 901,
+        sold_items_count: 24,
+        total_ratings: 17,
+      }),
+    );
+    const { root } = renderSearch(searchResult([listing(1)]), bridge);
+    root.querySelector<HTMLButtonElement>(".title-button")?.click();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("A carefully used camera."),
+    );
+    bridge.calls.length = 0;
+
+    const button = (text: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+        (candidate) => candidate.textContent === text,
+      );
+    button("Load attributes")?.click();
+    await vi.waitFor(() => expect(root.textContent).toContain("Colour"));
+    expect(bridge.calls).toEqual([
+      { arguments_: { listing_id: 1 }, name: "get_listing_attributes" },
+    ]);
+
+    button("Load market signals")?.click();
+    await vi.waitFor(() => expect(root.textContent).toContain("Reserve met"));
+    expect(bridge.calls.slice(1)).toEqual([
+      { arguments_: { listing_id: 1 }, name: "get_listing_bid_summary" },
+      {
+        arguments_: { listing_id: 1 },
+        name: "get_public_ratings_summary",
+      },
+    ]);
+    expect(root.textContent).toContain("92.5%");
+
+    button("Load seller profile")?.click();
+    await vi.waitFor(() => expect(root.textContent).toContain("Items sold"));
+    expect(bridge.calls.at(-1)).toEqual({
+      arguments_: { seller_id: 901 },
+      name: "get_public_seller_profile",
+    });
+    expect(root.textContent).toContain("Identity verified");
+    expect(root.textContent).toContain(
+      '<img data-hostile-profile="true" src=x>',
+    );
+    expect(root.querySelector("[data-hostile-profile]")).toBeNull();
+    expect(root.querySelector("[data-hostile-category]")).toBeNull();
+
+    const report = await axe.run(document.body, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    expect(report.violations).toEqual([]);
+  });
+
+  it("keeps unsafe or mismatched research results out of the listing detail", async () => {
+    const bridge = new FakeBridge();
+    bridge.toolResults.set(
+      "get_listing_attributes",
+      result({
+        attributes: [
+          { display_value: "not shown", label: "Unsafe", listing_id: 2 },
+        ],
+        listing_id: 2,
+      }),
+    );
+    const { root } = renderSearch(searchResult([listing(1)]), bridge);
+    root.querySelector<HTMLButtonElement>(".title-button")?.click();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("A carefully used camera."),
+    );
+    const attributes = [
+      ...root.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((candidate) => candidate.textContent === "Load attributes");
+    attributes?.click();
+
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("research data could not be loaded"),
+    );
+    expect(root.textContent).not.toContain("not shown");
   });
 
   it("uses a focusable native button for keyboard listing activation", () => {
