@@ -17,11 +17,19 @@ import {
   MAX_SELECTED_LISTINGS,
   MAX_VISIBLE_LISTINGS,
   mergeListings,
+  normalizeListingAttributes,
+  normalizeListingBidSummary,
+  normalizeListingRatingSummary,
+  normalizeSellerProfile,
   normalizeToolResult,
   type CollectionView,
   type ExplorerView,
   type Listing,
+  type ListingAttributes,
+  type ListingBidSummary,
+  type ListingRatingSummary,
   type Money,
+  type SellerProfile,
   type ToolSource,
 } from "./model";
 import {
@@ -47,12 +55,33 @@ interface StatusMessage {
   key: TranslationKey;
 }
 
+type ResearchStatus = "error" | "idle" | "loaded" | "loading";
+type ResearchKind = "attributes" | "seller" | "signals";
+
+interface ResearchPanel<T> {
+  status: ResearchStatus;
+  value?: T;
+}
+
+interface ListingSignals {
+  bids: ListingBidSummary;
+  ratings: ListingRatingSummary;
+}
+
+interface DetailResearch {
+  attributes: ResearchPanel<ListingAttributes>;
+  listingId: number;
+  seller: ResearchPanel<SellerProfile>;
+  signals: ResearchPanel<ListingSignals>;
+}
+
 export class MarketplaceExplorer {
   readonly #root: HTMLElement;
   readonly #bridge: HostBridge;
   readonly #origins: Readonly<PublicOrigins>;
   #connected = false;
   #context: McpUiHostContext = {};
+  #detailResearch?: DetailResearch;
   #history: ExplorerView[] = [];
   #initialArguments: Record<string, unknown> = {};
   #initialToolName = "";
@@ -195,6 +224,12 @@ export class MarketplaceExplorer {
         this.#history = [...this.#history.slice(-9), this.#view];
       }
       this.#view = normalized.view;
+    }
+    if (
+      this.#view.kind !== "detail" ||
+      this.#detailResearch?.listingId !== this.#view.listing.id
+    ) {
+      this.#detailResearch = undefined;
     }
     this.render();
   }
@@ -502,6 +537,7 @@ export class MarketplaceExplorer {
       );
       content.append(protection);
     }
+    content.append(this.#renderResearch(listing));
 
     const actions = node("div", "detail-actions");
     const external = this.#button(this.#t("viewOnBudna"), "primary", () => {
@@ -535,6 +571,210 @@ export class MarketplaceExplorer {
     content.append(actions);
     article.append(gallery, content);
     return article;
+  }
+
+  #renderResearch(listing: Listing): HTMLElement {
+    const research = this.#researchFor(listing);
+    const section = node("section", "detail-section research-section");
+    section.append(node("h3", "section-title", this.#t("listingResearch")));
+
+    const actions = node("div", "research-actions");
+    const attributes = this.#button(
+      this.#t("loadAttributes"),
+      "secondary",
+      () => this.#loadResearch(listing, "attributes"),
+    );
+    attributes.disabled =
+      !this.#supportsServerTools() || research.attributes.status === "loading";
+    actions.append(attributes);
+
+    const signals = this.#button(
+      this.#t("loadMarketSignals"),
+      "secondary",
+      () => this.#loadResearch(listing, "signals"),
+    );
+    signals.disabled =
+      !this.#supportsServerTools() || research.signals.status === "loading";
+    actions.append(signals);
+
+    const seller = this.#button(this.#t("loadSellerProfile"), "secondary", () =>
+      this.#loadResearch(listing, "seller"),
+    );
+    seller.disabled =
+      !this.#supportsServerTools() || research.seller.status === "loading";
+    actions.append(seller);
+    section.append(actions);
+
+    const panels = node("div", "research-panels");
+    const attributesPanel = this.#renderAttributesResearch(research.attributes);
+    const signalsPanel = this.#renderSignalsResearch(research.signals);
+    const sellerPanel = this.#renderSellerResearch(research.seller);
+    if (attributesPanel) panels.append(attributesPanel);
+    if (signalsPanel) panels.append(signalsPanel);
+    if (sellerPanel) panels.append(sellerPanel);
+    if (panels.childElementCount > 0) section.append(panels);
+    return section;
+  }
+
+  #renderAttributesResearch(
+    research: ResearchPanel<ListingAttributes>,
+  ): HTMLElement | undefined {
+    if (research.status === "idle") return undefined;
+    const panel = this.#researchPanel(this.#t("attributes"), research.status);
+    if (research.status === "error") {
+      panel.append(
+        node("p", "research-message", this.#t("researchUnavailable")),
+      );
+      return panel;
+    }
+    if (research.status === "loading") return panel;
+    const attributes = research.value?.attributes ?? [];
+    if (attributes.length === 0) {
+      panel.append(node("p", "research-message", this.#t("noAttributes")));
+      return panel;
+    }
+    const list = node("dl", "research-facts");
+    for (const attribute of attributes) {
+      this.#definition(list, attribute.label, attribute.displayValue);
+    }
+    panel.append(list);
+    if (research.value?.truncated) {
+      panel.append(node("p", "research-message", this.#t("researchTruncated")));
+    }
+    return panel;
+  }
+
+  #renderSignalsResearch(
+    research: ResearchPanel<ListingSignals>,
+  ): HTMLElement | undefined {
+    if (research.status === "idle") return undefined;
+    const panel = this.#researchPanel(
+      this.#t("marketSignals"),
+      research.status,
+    );
+    if (research.status === "error") {
+      panel.append(
+        node("p", "research-message", this.#t("researchUnavailable")),
+      );
+      return panel;
+    }
+    if (research.status === "loading") return panel;
+    const signals = research.value;
+    if (!signals) return panel;
+    const facts = node("dl", "research-facts");
+    if (signals.bids.currentBid) {
+      this.#definition(
+        facts,
+        this.#t("currentBid"),
+        this.#money(signals.bids.currentBid),
+      );
+    }
+    if (signals.bids.bidCount !== undefined) {
+      this.#definition(
+        facts,
+        this.#t("bids"),
+        signals.bids.bidCount.toLocaleString(this.#locale),
+      );
+    }
+    this.#definition(
+      facts,
+      this.#t("reserveStatus"),
+      this.#t(signals.bids.reservePriceMet ? "reserveMet" : "reserveNotMet"),
+    );
+    this.#definition(
+      facts,
+      this.#t("averageRating"),
+      signals.ratings.averageRating.toLocaleString(this.#locale, {
+        maximumFractionDigits: 2,
+      }),
+    );
+    this.#definition(
+      facts,
+      this.#t("positiveRatings"),
+      `${signals.ratings.positivePercentage.toLocaleString(this.#locale, {
+        maximumFractionDigits: 2,
+      })}%`,
+    );
+    this.#definition(
+      facts,
+      this.#t("ratings"),
+      signals.ratings.totalRatings.toLocaleString(this.#locale),
+    );
+    panel.append(facts);
+    return panel;
+  }
+
+  #renderSellerResearch(
+    research: ResearchPanel<SellerProfile>,
+  ): HTMLElement | undefined {
+    if (research.status === "idle") return undefined;
+    const panel = this.#researchPanel(
+      this.#t("sellerProfile"),
+      research.status,
+    );
+    if (research.status === "error") {
+      panel.append(
+        node("p", "research-message", this.#t("researchUnavailable")),
+      );
+      return panel;
+    }
+    if (research.status === "loading") return panel;
+    const seller = research.value;
+    if (!seller) return panel;
+    const facts = node("dl", "research-facts");
+    this.#definition(facts, this.#t("seller"), seller.displayName);
+    this.#definition(facts, this.#t("sellerRating"), seller.rating);
+    this.#definition(
+      facts,
+      this.#t("ratings"),
+      seller.totalRatings.toLocaleString(this.#locale),
+    );
+    this.#definition(
+      facts,
+      this.#t("sellerItemsSold"),
+      seller.soldItemsCount.toLocaleString(this.#locale),
+    );
+    this.#definition(
+      facts,
+      this.#t("identity"),
+      this.#t(seller.identityVerified ? "verifiedSeller" : "notVerifiedSeller"),
+    );
+    this.#definition(
+      facts,
+      this.#t("sellerType"),
+      this.#t(seller.isCompany ? "companySeller" : "privateSeller"),
+    );
+    if (seller.city || seller.country) {
+      this.#definition(
+        facts,
+        this.#t("location"),
+        [seller.city, seller.country].filter(isString).join(", "),
+      );
+    }
+    panel.append(facts);
+    if (seller.categories.length > 0) {
+      panel.append(
+        node(
+          "p",
+          "research-message",
+          `${this.#t("categories")}: ${seller.categories.join(", ")}`,
+        ),
+      );
+    }
+    if (seller.bio) {
+      panel.append(node("p", "description", seller.bio));
+    }
+    return panel;
+  }
+
+  #researchPanel(title: string, status: ResearchStatus): HTMLElement {
+    const panel = node("section", "research-panel");
+    panel.setAttribute("aria-live", "polite");
+    panel.append(node("h4", "research-title", title));
+    if (status === "loading") {
+      panel.append(node("p", "research-message", this.#t("loadingResearch")));
+    }
+    return panel;
   }
 
   #renderImage(listing: Listing, className: string): HTMLElement {
@@ -665,6 +905,92 @@ export class MarketplaceExplorer {
       { arguments: { listing_id: listing.id }, name: "get_listing" },
       "push",
     );
+  }
+
+  async #loadResearch(listing: Listing, kind: ResearchKind): Promise<void> {
+    if (!this.#supportsServerTools()) return;
+    const research = this.#researchFor(listing);
+    const panel = research[kind];
+    if (panel.status === "loading") return;
+    panel.status = "loading";
+    panel.value = undefined;
+    this.render();
+
+    try {
+      if (kind === "attributes") {
+        const result = await this.#bridge.callTool("get_listing_attributes", {
+          listing_id: listing.id,
+        });
+        const value =
+          !result.isError &&
+          normalizeListingAttributes(result.structuredContent, listing.id);
+        this.#settleResearch(research, kind, value || undefined);
+        return;
+      }
+      if (kind === "seller") {
+        const result = await this.#bridge.callTool(
+          "get_public_seller_profile",
+          {
+            seller_id: listing.sellerId,
+          },
+        );
+        const value =
+          !result.isError &&
+          normalizeSellerProfile(result.structuredContent, listing.sellerId);
+        this.#settleResearch(research, kind, value || undefined);
+        return;
+      }
+      const [bidsResult, ratingsResult] = await Promise.all([
+        this.#bridge.callTool("get_listing_bid_summary", {
+          listing_id: listing.id,
+        }),
+        this.#bridge.callTool("get_public_ratings_summary", {
+          listing_id: listing.id,
+        }),
+      ]);
+      const bids =
+        !bidsResult.isError &&
+        normalizeListingBidSummary(bidsResult.structuredContent, listing.id);
+      const ratings =
+        !ratingsResult.isError &&
+        normalizeListingRatingSummary(
+          ratingsResult.structuredContent,
+          listing.id,
+        );
+      this.#settleResearch(
+        research,
+        kind,
+        bids && ratings ? { bids, ratings } : undefined,
+      );
+    } catch {
+      this.#settleResearch(research, kind, undefined);
+    }
+  }
+
+  #settleResearch<T>(
+    research: DetailResearch,
+    kind: ResearchKind,
+    value: T | undefined,
+  ): void {
+    if (this.#detailResearch !== research) return;
+    const panel = research[kind] as ResearchPanel<T>;
+    panel.status = value === undefined ? "error" : "loaded";
+    panel.value = value;
+    this.render();
+  }
+
+  #researchFor(listing: Listing): DetailResearch {
+    if (this.#detailResearch?.listingId === listing.id) {
+      return this.#detailResearch;
+    }
+    const research: DetailResearch = {
+      attributes: { status: "idle" },
+      listingId: listing.id,
+      seller: { status: "idle" },
+      signals: { status: "idle" },
+    };
+    this.#detailResearch = research;
+    return research;
   }
 
   async #openListing(listing: Listing): Promise<void> {

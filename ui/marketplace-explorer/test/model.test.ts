@@ -7,6 +7,10 @@ import {
   displayedPrice,
   MAX_VISIBLE_LISTINGS,
   mergeListings,
+  normalizeListingAttributes,
+  normalizeListingBidSummary,
+  normalizeListingRatingSummary,
+  normalizeSellerProfile,
   normalizeToolResult,
   type Listing,
 } from "@budna-ui/model";
@@ -209,6 +213,89 @@ describe("marketplace result normalization", () => {
         { arguments: {}, name: "search_listings" },
       ),
     ).toMatchObject({ ok: false, reason: "error" });
+  });
+
+  it("normalizes only matching, bounded detail-research projections", () => {
+    expect(
+      normalizeListingAttributes(
+        {
+          attributes: [
+            {
+              display_value: "Black",
+              label: "Colour",
+              listing_id: 5,
+            },
+          ],
+          listing_id: 5,
+          truncated: false,
+        },
+        5,
+      ),
+    ).toEqual({
+      attributes: [{ displayValue: "Black", label: "Colour" }],
+      truncated: false,
+    });
+    expect(
+      normalizeListingBidSummary(
+        {
+          bid_count: 0,
+          current_bid: null,
+          listing_id: 5,
+          reserve_price_met: false,
+        },
+        5,
+      ),
+    ).toEqual({ bidCount: 0, currentBid: undefined, reservePriceMet: false });
+    expect(
+      normalizeListingRatingSummary(
+        {
+          average_rating: 4.5,
+          listing_id: 5,
+          positive_percentage: 92.5,
+          total_ratings: 12,
+        },
+        5,
+      ),
+    ).toEqual({
+      averageRating: 4.5,
+      positivePercentage: 92.5,
+      totalRatings: 12,
+    });
+    expect(
+      normalizeSellerProfile(
+        {
+          categories: ["Cameras"],
+          display_name: "Seller",
+          identity_verified: true,
+          is_company: false,
+          rating: "4.9",
+          seller_id: 9,
+          sold_items_count: 3,
+          total_ratings: 7,
+        },
+        9,
+      ),
+    ).toMatchObject({
+      categories: ["Cameras"],
+      displayName: "Seller",
+      rating: "4.9",
+      soldItemsCount: 3,
+      totalRatings: 7,
+    });
+    expect(
+      normalizeSellerProfile(
+        {
+          display_name: "Wrong seller",
+          identity_verified: true,
+          is_company: false,
+          rating: "4.9",
+          seller_id: 10,
+          sold_items_count: 3,
+          total_ratings: 7,
+        },
+        9,
+      ),
+    ).toBeUndefined();
   });
 });
 
